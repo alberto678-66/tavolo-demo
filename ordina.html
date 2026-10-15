@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>Menu</title>
+<style>
+:root{--accent:#2F6B4F;--bg:#F6F4EF;--card:#fff;--ink:#1E2420;--mut:#6B726D;--line:#E4E1D8;--crit:#B3402F;--ok:#2F6B4F;--f:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+@media (prefers-color-scheme:dark){:root{--bg:#141714;--card:#1D211E;--ink:#E9ECE8;--mut:#9BA49E;--line:#2D332F;--crit:#F08F7E}}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.45 var(--f);-webkit-text-size-adjust:100%}
+button{font:inherit;color:inherit;cursor:pointer}
+header{position:sticky;top:0;z-index:5;background:var(--bg);padding:14px 16px 8px;border-bottom:1px solid var(--line)}
+.top{display:flex;align-items:center;gap:10px;justify-content:space-between}
+h1{font-size:20px;margin:0;line-height:1.2}
+.sub{color:var(--mut);font-size:13.5px}
+select{font:inherit;padding:6px 8px;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--ink)}
+.cats{display:flex;gap:6px;overflow-x:auto;padding:10px 0 2px;scrollbar-width:none}
+.cats::-webkit-scrollbar{display:none}
+.cats button{flex:0 0 auto;border:1px solid var(--line);background:var(--card);border-radius:99px;padding:6px 13px;font-size:14.5px;white-space:nowrap}
+.cats button[aria-pressed=true]{background:var(--accent);border-color:var(--accent);color:#fff}
+main{padding:8px 16px 140px;max-width:640px;margin:0 auto}
+h2{font-size:15px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut);margin:22px 0 8px}
+.item{display:flex;gap:12px;align-items:center;justify-content:space-between;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px 12px 12px 14px;margin-bottom:8px}
+.item .n{font-weight:600}
+.item .it{color:var(--mut);font-size:13px}
+.item .al{color:var(--mut);font-size:12.5px;margin-top:2px}
+.item .p{font-variant-numeric:tabular-nums;font-size:14.5px;margin-top:2px}
+.q{display:flex;align-items:center;gap:8px;flex:0 0 auto}
+.q button{width:38px;height:38px;border-radius:50%;border:1px solid var(--line);background:var(--card);font-size:20px;line-height:1;display:grid;place-items:center}
+.q button.add{background:var(--accent);border-color:var(--accent);color:#fff}
+.q b{min-width:18px;text-align:center;font-variant-numeric:tabular-nums}
+.bar{position:fixed;left:0;right:0;bottom:0;z-index:6;padding:10px 16px calc(10px + env(safe-area-inset-bottom));background:var(--bg);border-top:1px solid var(--line)}
+.bar .in{max-width:640px;margin:0 auto;display:grid;gap:8px}
+.big{width:100%;border:0;border-radius:14px;padding:14px;font-weight:600;background:var(--accent);color:#fff;font-size:16.5px;display:flex;justify-content:space-between}
+.row{display:flex;gap:8px}
+.ghost{flex:1;border:1px solid var(--line);background:var(--card);border-radius:12px;padding:10px;font-size:14.5px}
+.sheet{position:fixed;inset:0;z-index:10;background:rgba(0,0,0,.45);display:flex;align-items:flex-end;justify-content:center}
+.sheet .box{background:var(--bg);width:100%;max-width:640px;border-radius:18px 18px 0 0;padding:18px 16px calc(18px + env(safe-area-inset-bottom));max-height:88vh;overflow:auto}
+.sheet h3{margin:0 0 10px;font-size:19px}
+.line{display:flex;justify-content:space-between;gap:10px;padding:9px 0;border-bottom:1px solid var(--line)}
+.line .x{display:flex;align-items:center;gap:8px}
+textarea{width:100%;font:inherit;border:1px solid var(--line);border-radius:12px;padding:10px;background:var(--card);color:var(--ink);min-height:64px;margin-top:10px}
+.note{font-size:13px;color:var(--mut);margin-top:10px}
+.stato{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px 14px;margin:12px 0;font-size:14.5px}
+.stato b{display:block}
+.ok{color:var(--ok)} .no{color:var(--crit)}
+.chiuso{text-align:center;padding:60px 20px;color:var(--mut)}
+.rec{display:block;text-align:center;margin:26px 0 8px;padding:12px;border-radius:12px;border:1px solid var(--line);background:var(--card);color:var(--ink);text-decoration:none}
+.toast{position:fixed;left:50%;bottom:120px;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:12px;font-size:14.5px;z-index:20;max-width:90vw;text-align:center}
+</style>
+</head>
+<body>
+<header id="hd" hidden><div class="top"><div><h1 id="nome"></h1><div class="sub" id="tav"></div></div><select id="lang" aria-label="Lingua"></select></div><nav class="cats" id="cats"></nav></header>
+<main id="m"><p class="chiuso">…</p></main>
+<div class="bar" id="bar" hidden><div class="in"><button class="big" id="vedi"><span id="vediT"></span><span id="vediP"></span></button><div class="row"><button class="ghost" id="cam"></button><button class="ghost" id="conto"></button></div></div></div>
+<div id="sh"></div>
+<div class="toast" id="toast" hidden></div>
+<script src="demo.js"></script>
+<script>
+"use strict";
+const L={
+ it:{lingua:"Italiano",tav:"Tavolo",ordine:"Il tuo ordine",vedi:"Vedi ordine",invia:"Invia al cameriere",cam:"Chiama il cameriere",conto:"Chiedi il conto",nota:"Allergie o richieste per la cucina (facoltativo)",vuoto:"Aggiungi qualcosa dal menu",attesa:"Ordine inviato: il cameriere lo conferma tra poco.",accettato:"Ordine confermato dal cameriere.",rifiutato:"Il cameriere non ha confermato l'ordine: chiedi pure a lui.",chiamata:"Il cameriere arriva.",chiuso:"Gli ordini dal tavolo ora non sono attivi. Chiedi al personale.",codice:"Questo QR non è più valido. Chiedi al personale.",rete:"Collegati al Wi-Fi del locale per ordinare.",troppe:"Hai già inviato diverse richieste: aspetta il cameriere.",all:"Allergeni",coperto:"Coperto a persona",info:"Per allergie e intolleranze chiedi sempre conferma al personale. Il conto si paga al cameriere.",rec:"Ti è piaciuto? Lasciaci una recensione su Google",tot:"Totale",chiudi:"Chiudi",piatti:"piatti",inviato:"Inviato"},
+ en:{lingua:"English",tav:"Table",ordine:"Your order",vedi:"View order",invia:"Send to the waiter",cam:"Call the waiter",conto:"Ask for the bill",nota:"Allergies or requests for the kitchen (optional)",vuoto:"Add something from the menu",attesa:"Order sent: the waiter will confirm it shortly.",accettato:"Order confirmed by the waiter.",rifiutato:"The waiter did not confirm the order: please ask them.",chiamata:"The waiter is coming.",chiuso:"Ordering from the table is not available now. Please ask the staff.",codice:"This QR code is no longer valid. Please ask the staff.",rete:"Connect to the restaurant Wi-Fi to order.",troppe:"You have already sent several requests: please wait for the waiter.",all:"Allergens",coperto:"Cover charge per person",info:"For allergies and intolerances always check with the staff. Please pay the waiter.",rec:"Enjoyed it? Leave us a review on Google",tot:"Total",chiudi:"Close",piatti:"items",inviato:"Sent"},
+ fr:{lingua:"Français",tav:"Table",ordine:"Votre commande",vedi:"Voir la commande",invia:"Envoyer au serveur",cam:"Appeler le serveur",conto:"Demander l'addition",nota:"Allergies ou demandes pour la cuisine (facultatif)",vuoto:"Ajoutez quelque chose du menu",attesa:"Commande envoyée : le serveur va la confirmer.",accettato:"Commande confirmée par le serveur.",rifiutato:"Le serveur n'a pas confirmé la commande : demandez-lui.",chiamata:"Le serveur arrive.",chiuso:"La commande depuis la table n'est pas disponible. Demandez au personnel.",codice:"Ce QR code n'est plus valable. Demandez au personnel.",rete:"Connectez-vous au Wi-Fi du restaurant pour commander.",troppe:"Vous avez déjà envoyé plusieurs demandes : attendez le serveur.",all:"Allergènes",coperto:"Couvert par personne",info:"Pour les allergies, demandez toujours confirmation au personnel. L'addition se règle auprès du serveur.",rec:"Vous avez aimé ? Laissez-nous un avis sur Google",tot:"Total",chiudi:"Fermer",piatti:"articles",inviato:"Envoyé"},
+ de:{lingua:"Deutsch",tav:"Tisch",ordine:"Ihre Bestellung",vedi:"Bestellung ansehen",invia:"An den Kellner senden",cam:"Kellner rufen",conto:"Rechnung bitte",nota:"Allergien oder Wünsche für die Küche (optional)",vuoto:"Wählen Sie etwas aus der Karte",attesa:"Bestellung gesendet: der Kellner bestätigt sie gleich.",accettato:"Bestellung vom Kellner bestätigt.",rifiutato:"Der Kellner hat die Bestellung nicht bestätigt: bitte fragen Sie ihn.",chiamata:"Der Kellner kommt.",chiuso:"Bestellen am Tisch ist gerade nicht möglich. Bitte fragen Sie das Personal.",codice:"Dieser QR-Code ist nicht mehr gültig. Bitte fragen Sie das Personal.",rete:"Verbinden Sie sich mit dem WLAN des Lokals, um zu bestellen.",troppe:"Sie haben schon mehrere Anfragen gesendet: bitte warten Sie auf den Kellner.",all:"Allergene",coperto:"Gedeck pro Person",info:"Bei Allergien fragen Sie bitte immer das Personal. Bezahlt wird beim Kellner.",rec:"Hat es Ihnen geschmeckt? Bewerten Sie uns auf Google",tot:"Summe",chiudi:"Schließen",piatti:"Artikel",inviato:"Gesendet"},
+ es:{lingua:"Español",tav:"Mesa",ordine:"Tu pedido",vedi:"Ver pedido",invia:"Enviar al camarero",cam:"Llamar al camarero",conto:"Pedir la cuenta",nota:"Alergias o peticiones para la cocina (opcional)",vuoto:"Añade algo de la carta",attesa:"Pedido enviado: el camarero lo confirmará enseguida.",accettato:"Pedido confirmado por el camarero.",rifiutato:"El camarero no ha confirmado el pedido: pregúntale.",chiamata:"El camarero ya viene.",chiuso:"Ahora no se puede pedir desde la mesa. Pregunta al personal.",codice:"Este código QR ya no es válido. Pregunta al personal.",rete:"Conéctate al Wi-Fi del local para pedir.",troppe:"Ya has enviado varias peticiones: espera al camarero.",all:"Alérgenos",coperto:"Cubierto por persona",info:"Para alergias e intolerancias consulta siempre al personal. La cuenta se paga al camarero.",rec:"¿Te ha gustado? Déjanos una reseña en Google",tot:"Total",chiudi:"Cerrar",piatti:"artículos",inviato:"Enviado"}};
+const ALL={it:["Glutine","Crostacei","Uova","Pesce","Arachidi","Soia","Latte","Frutta a guscio","Sedano","Senape","Sesamo","Solfiti","Lupini","Molluschi"],
+ en:["Gluten","Crustaceans","Eggs","Fish","Peanuts","Soybeans","Milk","Nuts","Celery","Mustard","Sesame","Sulphites","Lupin","Molluscs"],
+ fr:["Gluten","Crustacés","Œufs","Poisson","Arachides","Soja","Lait","Fruits à coque","Céleri","Moutarde","Sésame","Sulfites","Lupin","Mollusques"],
+ de:["Gluten","Krebstiere","Eier","Fisch","Erdnüsse","Soja","Milch","Schalenfrüchte","Sellerie","Senf","Sesam","Sulfite","Lupinen","Weichtiere"],
+ es:["Gluten","Crustáceos","Huevos","Pescado","Cacahuetes","Soja","Leche","Frutos de cáscara","Apio","Mostaza","Sésamo","Sulfitos","Altramuces","Moluscos"]};
+const $=id=>document.getElementById(id);
+const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const qs=new URLSearchParams(location.search),T=qs.get("t")||"",K=qs.get("k")||"";
+const store={get(k){try{return localStorage.getItem(k)}catch(e){return null}},set(k,v){try{localStorage.setItem(k,v)}catch(e){}}};
+let lang=store.get("tavolo-ordina-lingua")||((navigator.language||"it").slice(0,2).toLowerCase());if(!L[lang])lang="en";
+let D=null,cat=null,cart={},nota="",inviando=false;
+const t=k=>L[lang][k]||L.it[k];
+const eur=n=>(Math.round(n*100)/100).toLocaleString(lang==="en"?"en-GB":lang,{style:"currency",currency:"EUR"});
+const nomeDi=x=>lang!=="it"&&x.tr&&x.tr[lang]||x.nome;
+const itDi=x=>lang!=="it"&&x.tr&&x.tr[lang]&&x.tr[lang]!==x.nome?x.nome:"";
+function toast(m){const e=$("toast");e.textContent=m;e.hidden=false;clearTimeout(toast.h);toast.h=setTimeout(()=>e.hidden=true,3500)}
+async function chiedi(url,body){
+  const r=await fetch(url,body?{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)}:{cache:"no-store"});
+  let j={};try{j=await r.json()}catch(e){}if(!r.ok){const e=new Error(j.errore||"rete");e.codice=j.errore;throw e}return j}
+function chiuso(msg){$("hd").hidden=true;$("bar").hidden=true;$("m").innerHTML=`<p class="chiuso">${esc(msg)}</p>`}
+async function carica(){
+  try{D=await chiedi(`/api/qr/menu?t=${encodeURIComponent(T)}&k=${encodeURIComponent(K)}`)}
+  catch(e){chiuso(e.codice==="codice"?t("codice"):e.codice==="chiuso"?t("chiuso"):t("rete"));return}
+  document.documentElement.style.setProperty("--accent",D.locale.accent||"#2F6B4F");document.title=D.locale.nome;
+  if(!D.aperto){chiuso(t("chiuso"));return}
+  if(!cat||!D.categorie.some(c=>c.nome===cat))cat=(D.categorie[0]||{}).nome;
+  Object.keys(cart).forEach(id=>{if(!D.menu.some(m=>m.id===id))delete cart[id]});
+  disegna();
+}
+function disegna(){
+  document.documentElement.lang=lang;
+  $("hd").hidden=false;$("nome").textContent=D.locale.nome;$("tav").textContent=(/^\d+$/.test(D.tavolo)?t("tav")+" "+D.tavolo:D.tavolo);
+  $("lang").innerHTML=Object.keys(L).map(k=>`<option value="${k}" ${k===lang?"selected":""}>${L[k].lingua}</option>`).join("");
+  $("cats").innerHTML=D.categorie.map(c=>`<button data-cat="${esc(c.nome)}" aria-pressed="${c.nome===cat}">${esc(nomeDi(c))}</button>`).join("");
+  const ultime=D.richieste.slice(-3).reverse();
+  const stati=ultime.map(r=>r.tipo==="ordine"?`<div class="stato"><b class="${r.stato==="accettato"?"ok":r.stato==="rifiutato"?"no":""}">${esc(t(r.stato==="accettato"?"accettato":r.stato==="rifiutato"?"rifiutato":"attesa"))}</b><span class="sub">${t("inviato")} ${new Date(r.ora).toLocaleTimeString(lang,{hour:"2-digit",minute:"2-digit"})} · ${r.n} ${t("piatti")}</span></div>`:r.stato==="attesa"?`<div class="stato"><b>${esc(t("chiamata"))}</b></div>`:"").join("");
+  const piatti=D.menu.filter(m=>m.cat===cat);
+  $("m").innerHTML=stati+`<h2>${esc(nomeDi(D.categorie.find(c=>c.nome===cat)||{nome:""}))}</h2>`+piatti.map(m=>{const q=cart[m.id]||0;
+    return`<div class="item"><div><div class="n">${esc(nomeDi(m))}</div>${itDi(m)?`<div class="it">${esc(itDi(m))}</div>`:""}<div class="p">${eur(m.prezzo)}</div>${m.all.length?`<div class="al">${t("all")}: ${m.all.map(a=>esc(ALL[lang][a-1])).join(", ")}</div>`:""}</div>
+    <div class="q">${q?`<button data-meno="${m.id}" aria-label="−">−</button><b>${q}</b>`:""}<button class="add" data-piu="${m.id}" aria-label="+">+</button></div></div>`}).join("")
+    +`<p class="note">${esc(t("info"))}${D.locale.coperto>0?` ${esc(t("coperto"))}: ${eur(D.locale.coperto)}.`:""}</p>`
+    +(D.locale.recensione?`<a class="rec" href="${esc(D.locale.recensione)}" target="_blank" rel="noopener">★ ${esc(t("rec"))}</a>`:"");
+  const n=Object.values(cart).reduce((s,q)=>s+q,0),tot=Object.entries(cart).reduce((s,[id,q])=>s+((D.menu.find(m=>m.id===id)||{prezzo:0}).prezzo*q),0);
+  $("bar").hidden=false;$("vedi").hidden=!n;$("vediT").textContent=`${t("vedi")} (${n})`;$("vediP").textContent=eur(tot);
+  $("cam").textContent="🔔 "+t("cam");$("conto").textContent="🧾 "+t("conto");
+}
+function foglio(){
+  const righe=Object.entries(cart).map(([id,q])=>({m:D.menu.find(x=>x.id===id),q})).filter(x=>x.m);
+  if(!righe.length){$("sh").innerHTML="";return}
+  const tot=righe.reduce((s,x)=>s+x.m.prezzo*x.q,0);
+  $("sh").innerHTML=`<div class="sheet" data-chiudi="1"><div class="box"><h3>${esc(t("ordine"))}</h3>${righe.map(x=>`<div class="line"><span>${esc(nomeDi(x.m))}</span><span class="x"><span class="q"><button data-meno="${x.m.id}">−</button><b>${x.q}</b><button data-piu="${x.m.id}">+</button></span></span></div>`).join("")}
+  <div class="line"><b>${esc(t("tot"))}</b><b>${eur(tot)}</b></div>
+  <textarea id="nota" maxlength="120" placeholder="${esc(t("nota"))}">${esc(nota)}</textarea>
+  <p class="note">${esc(t("info"))}</p>
+  <div class="row" style="margin-top:12px"><button class="ghost" data-chiudi="1">${esc(t("chiudi"))}</button><button class="big" id="manda" style="flex:2;justify-content:center">${esc(t("invia"))}</button></div></div></div>`;
+}
+document.addEventListener("click",async e=>{
+  const b=e.target.closest("[data-cat],[data-piu],[data-meno],[data-chiudi],#vedi,#cam,#conto,#manda");if(!b)return;
+  if(b.dataset.cat){cat=b.dataset.cat;disegna();window.scrollTo(0,0);return}
+  if(b.dataset.piu){cart[b.dataset.piu]=Math.min(20,(cart[b.dataset.piu]||0)+1);disegna();if($("sh").innerHTML)foglio();return}
+  if(b.dataset.meno){const id=b.dataset.meno;cart[id]=(cart[id]||0)-1;if(cart[id]<=0)delete cart[id];disegna();if($("sh").innerHTML)foglio();return}
+  if(b.dataset.chiudi&&e.target===b){if($("nota"))nota=$("nota").value;$("sh").innerHTML="";return}
+  if(b.id==="vedi"){foglio();return}
+  if(b.id==="cam"||b.id==="conto"){try{await chiedi("/api/qr/chiama",{t:T,k:K,motivo:b.id==="conto"?"conto":"cameriere"});toast(t("chiamata"));carica()}catch(err){toast(err.codice==="troppe"?t("troppe"):err.codice==="chiuso"?t("chiuso"):t("rete"))}return}
+  if(b.id==="manda"){if(inviando)return;inviando=true;b.disabled=true;nota=$("nota")?$("nota").value:"";
+    try{await chiedi("/api/qr/ordine",{t:T,k:K,lingua:lang,nota,righe:Object.entries(cart).map(([mid,q])=>({mid,q}))});cart={};nota="";$("sh").innerHTML="";toast(t("attesa"));await carica();window.scrollTo(0,0)}
+    catch(err){toast(err.codice==="troppe"||err.codice==="attesa"?t("troppe"):err.codice==="chiuso"?t("chiuso"):err.codice==="codice"?t("codice"):t("rete"));b.disabled=false}
+    inviando=false;return}
+});
+$("lang").addEventListener("change",e=>{lang=e.target.value;store.set("tavolo-ordina-lingua",lang);disegna()});
+carica();setInterval(()=>{if(!$("sh").innerHTML&&!document.hidden)carica()},15000);
+</script>
+</body>
+</html>

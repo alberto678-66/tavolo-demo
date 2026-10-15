@@ -1,0 +1,17 @@
+{
+  "name": "Tavolo · Demo",
+  "short_name": "Tavolo",
+  "description": "Prova Tavolo, il gestionale per bar e ristoranti fatto a Catania",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#F4F6F3",
+  "theme_color": "#2F6B4F",
+  "lang": "it",
+  "icons": [
+    { "src": "icona-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icona-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icona.svg", "sizes": "any", "type": "image/svg+xml" }
+  ]
+}

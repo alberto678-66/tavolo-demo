@@ -1,0 +1,5 @@
+TAVOLO DEMO - app da condividere con un link
+
+Cartella da caricare su GitHub Pages. Contiene solo la demo:
+nessuna chiave, nessun token, nessun programma di controllo.
+I dati della demo restano sul telefono di chi la prova e si azzerano dopo 3 giorni.
