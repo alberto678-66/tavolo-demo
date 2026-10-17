@@ -25,6 +25,7 @@ h2{font-size:15px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut)
 .item{display:flex;gap:12px;align-items:center;justify-content:space-between;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px 12px 12px 14px;margin-bottom:8px}
 .item .n{font-weight:600}
 .item .it{color:var(--mut);font-size:13px}
+.item .ds{color:var(--mut);font-size:13px;font-style:italic;margin-top:2px}
 .item .al{color:var(--mut);font-size:12.5px;margin-top:2px}
 .item .p{font-variant-numeric:tabular-nums;font-size:14.5px;margin-top:2px}
 .q{display:flex;align-items:center;gap:8px;flex:0 0 auto}
@@ -81,6 +82,7 @@ const t=k=>L[lang][k]||L.it[k];
 const eur=n=>(Math.round(n*100)/100).toLocaleString(lang==="en"?"en-GB":lang,{style:"currency",currency:"EUR"});
 const nomeDi=x=>lang!=="it"&&x.tr&&x.tr[lang]||x.nome;
 const itDi=x=>lang!=="it"&&x.tr&&x.tr[lang]&&x.tr[lang]!==x.nome?x.nome:"";
+const descDi=x=>lang==="it"?x.desc||"":(x.descTr&&(x.descTr[lang]||x.descTr.en))||x.desc||"";
 function toast(m){const e=$("toast");e.textContent=m;e.hidden=false;clearTimeout(toast.h);toast.h=setTimeout(()=>e.hidden=true,3500)}
 async function chiedi(url,body){
   const r=await fetch(url,body?{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)}:{cache:"no-store"});
@@ -104,7 +106,7 @@ function disegna(){
   const stati=ultime.map(r=>r.tipo==="ordine"?`<div class="stato"><b class="${r.stato==="accettato"?"ok":r.stato==="rifiutato"?"no":""}">${esc(t(r.stato==="accettato"?"accettato":r.stato==="rifiutato"?"rifiutato":"attesa"))}</b><span class="sub">${t("inviato")} ${new Date(r.ora).toLocaleTimeString(lang,{hour:"2-digit",minute:"2-digit"})} · ${r.n} ${t("piatti")}</span></div>`:r.stato==="attesa"?`<div class="stato"><b>${esc(t("chiamata"))}</b></div>`:"").join("");
   const piatti=D.menu.filter(m=>m.cat===cat);
   $("m").innerHTML=stati+`<h2>${esc(nomeDi(D.categorie.find(c=>c.nome===cat)||{nome:""}))}</h2>`+piatti.map(m=>{const q=cart[m.id]||0;
-    return`<div class="item"><div><div class="n">${esc(nomeDi(m))}</div>${itDi(m)?`<div class="it">${esc(itDi(m))}</div>`:""}<div class="p">${eur(m.prezzo)}</div>${m.all.length?`<div class="al">${t("all")}: ${m.all.map(a=>esc(ALL[lang][a-1])).join(", ")}</div>`:""}</div>
+    return`<div class="item"><div><div class="n">${esc(nomeDi(m))}${m.surg?" *":""}</div>${itDi(m)?`<div class="it">${esc(itDi(m))}</div>`:""}${descDi(m)?`<div class="ds">${esc(descDi(m))}</div>`:""}<div class="p">${eur(m.prezzo)}</div>${m.all.length?`<div class="al">${t("all")}: ${m.all.map(a=>esc(ALL[lang][a-1])).join(", ")}</div>`:""}</div>
     <div class="q">${q?`<button data-meno="${m.id}" aria-label="−">−</button><b>${q}</b>`:""}<button class="add" data-piu="${m.id}" aria-label="+">+</button></div></div>`}).join("")
     +`<p class="note">${esc(t("info"))}${D.locale.coperto>0?` ${esc(t("coperto"))}: ${eur(D.locale.coperto)}.`:""}</p>`
     +(D.locale.recensione?`<a class="rec" href="${esc(D.locale.recensione)}" target="_blank" rel="noopener">★ ${esc(t("rec"))}</a>`:"");

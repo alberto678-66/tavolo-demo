@@ -9,9 +9,9 @@
       return;
     }
   } catch (e) {}
-  var VERSIONE = "1.8.1-demo";
+  var VERSIONE = "1.9.0-demo";
   var ASS = { nome: "Alberto Malic · Tavolo", tel: "349 699 1941", email: "malicalberto604@gmail.com" };
-  var KEY = "tavolo-demo-v1", DURATA = 3 * 864e5;
+  var KEY = "tavolo-demo-v2", DURATA = 3 * 864e5;
 
   /* ---- piccolo sostituto di crypto/Buffer di Node, sufficiente per la demo ---- */
   var hex = function (a) { return Array.prototype.map.call(a, function (x) { return x.toString(16).padStart(2, "0"); }).join(""); };
@@ -191,6 +191,12 @@ function seedDemo(o) {
     { id: uid(), data: tom, ora: "13:00", nome: "Ufficio Leotta", tel: "333 555 0104", persone: 8, tavolo: "T10", note: "pranzo di lavoro, fattura", stato: "attesa" },
     { id: uid(), data: tom, ora: "20:45", nome: "Caruso", tel: "333 555 0105", persone: 2, tavolo: "", note: "preferisce dehors", stato: "attesa" },
     { id: uid(), data: after, ora: "21:00", nome: "Greco", tel: "333 555 0106", persone: 5, tavolo: "", note: "celiaco al tavolo", stato: "attesa" }];
+  // descrizioni di esempio per il menu stampato e il QR (1.9)
+  [["Arancina al ragù", "Riso, ragù di carne, piselli e caciocavallo", "Rice ball with meat ragù, peas and caciocavallo cheese"], ["Caponata", "Melanzane, sedano, olive e capperi in agrodolce", "Sweet and sour aubergine, celery, olives and capers"],
+   ["Pasta alla Norma", "Melanzane fritte, pomodoro, basilico e ricotta salata", "Fried aubergine, tomato, basil and salted ricotta"], ["Pasta con le sarde", "Sarde, finocchietto selvatico, uvetta, pinoli e mollica tostata", "Sardines, wild fennel, raisins, pine nuts and toasted breadcrumbs"],
+   ["Involtini di pesce spada", "Pesce spada, pangrattato, pecorino e agrumi", "Swordfish rolls with breadcrumbs, pecorino and citrus"], ["Cannolo", "Cialda croccante e ricotta di pecora, riempito al momento", "Crispy shell filled with sheep ricotta on the spot"]]
+    .forEach(([n, it, en]) => { const m = by(n); if (m) { m.desc = it; m.descTr = { en }; } });
+  if (by("Involtini di pesce spada")) by("Involtini di pesce spada").surg = true;
   log(S, staff[0], "Dati di esempio caricati");
   return S;
 }
@@ -232,11 +238,201 @@ function testoPreconto(S, t) {
   return out;
 }
 
+/* ---------- Fatture elettroniche (1.9) ----------
+   Tavolo prepara il file XML nel formato FatturaPA (FPR12, privati e aziende) e la copia di cortesia.
+   Il file si carica sul portale "Fatture e Corrispettivi" dell'Agenzia delle Entrate o si manda al commercialista:
+   Tavolo non trasmette da solo al Sistema di Interscambio. */
+const REGIMI = { RF01: "Ordinario", RF19: "Forfettario (L. 190/2014)", RF02: "Contribuenti minimi (art. 27 D.L. 98/2011)" };
+const ALIQUOTE = [4, 5, 10, 22];
+const FORFETTARI = ["RF19", "RF02"];
+const CAUSALE_REGIME = {
+  RF19: "Operazione effettuata ai sensi dell'art. 1, commi da 54 a 89, della Legge n. 190/2014 - Regime forfettario. Operazione senza applicazione dell'IVA.",
+  RF02: "Operazione effettuata ai sensi dell'art. 27, commi 1 e 2, del D.L. n. 98/2011 - Regime dei contribuenti minimi. Operazione senza applicazione dell'IVA."
+};
+const RIF_NORMA = { RF19: "Regime forfettario art.1 c.54-89 L.190/2014", RF02: "Contribuenti minimi art.27 c.1-2 DL 98/2011" };
+const PAG_FATT = { contanti: "MP01", carta: "MP08", satispay: "MP08", bonifico: "MP05" };
+const SOGLIA_BOLLO = 77.47;
+function pivaOk(v) {
+  const s = String(v || ""); if (!/^\d{11}$/.test(s) || /^0{11}$/.test(s)) return false;
+  let t = 0; for (let i = 0; i < 10; i++) { let d = +s[i]; if (i % 2) { d *= 2; if (d > 9) d -= 9; } t += d; }
+  return (10 - t % 10) % 10 === +s[10];
+}
+function cfOk(v) {
+  const s = String(v || "").toUpperCase();
+  if (/^\d{11}$/.test(s)) return pivaOk(s); // codice fiscale numerico di società e enti
+  if (!/^[A-Z]{6}[0-9LMNPQRSTUV]{2}[A-EHLMPRST][0-9LMNPQRSTUV]{2}[A-Z][0-9LMNPQRSTUV]{3}[A-Z]$/.test(s)) return false;
+  const DISP = [1, 0, 5, 7, 9, 13, 15, 17, 19, 21, 2, 4, 18, 20, 11, 3, 6, 8, 12, 14, 16, 10, 22, 25, 24, 23];
+  let t = 0;
+  for (let i = 0; i < 15; i++) {
+    const c = s[i], n = c >= "0" && c <= "9" ? c.charCodeAt(0) - 48 : c.charCodeAt(0) - 65;
+    t += i % 2 ? n : DISP[n];
+  }
+  return String.fromCharCode(65 + t % 26) === s[15];
+}
+const emailOk = v => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(String(v || ""));
+// I campi della FatturaPA accettano solo caratteri latini: niente € e virgolette curve
+const latino = (v, max) => String(v == null ? "" : v).replace(/€/g, "EUR").replace(/[‘’]/g, "'").replace(/[“”]/g, '"').replace(/[–—]/g, "-").replace(/…/g, "...")
+  .normalize("NFC").replace(/[^\x20-\x7E -ÿ]/g, "").replace(/\s+/g, " ").trim().slice(0, max);
+const xe = s => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
+const fisc = S => S.settings.fisc || null;
+const forfettario = S => !!(fisc(S) && FORFETTARI.includes(fisc(S).regime));
+function fiscCompleti(f) {
+  return !!(f && f.den && pivaOk(f.piva) && f.ind && /^\d{5}$/.test(f.cap) && f.com && /^[A-Z]{2}$/.test(f.prov) && REGIMI[f.regime]);
+}
+// Importi: i prezzi del locale sono IVA compresa. Per ogni aliquota si scorpora il totale
+// in modo che imponibile + imposta torni esattamente al totale del conto.
+function scorporo(lordo, a) {
+  // l'imposta può essere arrotondata per eccesso o per difetto (specifiche FatturaPA, controllo 00421)
+  const base = round2(lordo / (1 + a / 100));
+  for (const d of [0, -0.01, 0.01, -0.02, 0.02, -0.03, 0.03]) {
+    const i = round2(base + d), grezza = i * a / 100;
+    for (const v of [round2(grezza), Math.floor(grezza * 100 + 1e-6) / 100, Math.ceil(grezza * 100 - 1e-6) / 100]) if (Math.abs(round2(i + v) - lordo) < 0.001) return { imp: i, iva: round2(v) };
+  }
+  return { imp: base, iva: round2(lordo - base) };
+}
+function calcolaFattura(righe, regime, bollo) {
+  const forf = FORFETTARI.includes(regime), linee = [], gruppi = {};
+  righe.forEach((r, i) => {
+    const a = forf ? 0 : r.aliq, lordo = round2(r.prezzo * r.q);
+    const unit = a ? r.prezzo / (1 + a / 100) : r.prezzo;
+    const pu = Math.round(unit * 1e6) / 1e6, pt = round2(pu * r.q);
+    linee.push({ n: i + 1, desc: r.desc, q: r.q, pu, pt, aliq: a, natura: forf ? "N2.2" : "", lordo });
+    const k = forf ? "N2.2" : String(a); (gruppi[k] = gruppi[k] || { aliq: a, natura: forf ? "N2.2" : "", lordo: 0, pt: 0 }); gruppi[k].lordo = round2(gruppi[k].lordo + lordo); gruppi[k].pt = round2(gruppi[k].pt + pt);
+  });
+  let totale = round2(righe.reduce((s, r) => s + round2(r.prezzo * r.q), 0));
+  const bolloSi = forf && totale > SOGLIA_BOLLO;
+  if (bolloSi && bollo) { linee.push({ n: linee.length + 1, desc: "Rimborso imposta di bollo", q: 1, pu: 2, pt: 2, aliq: 0, natura: "N1", lordo: 2, bollo: true }); gruppi.N1 = { aliq: 0, natura: "N1", lordo: 2, pt: 2 }; totale = round2(totale + 2); }
+  const riepilogo = Object.values(gruppi).map(g => {
+    const { imp, iva } = g.aliq ? scorporo(g.lordo, g.aliq) : { imp: g.lordo, iva: 0 };
+    return { aliq: g.aliq, natura: g.natura, imp, iva, arr: round2(imp - g.pt) };
+  }).sort((a, b) => b.aliq - a.aliq);
+  const imponibile = round2(riepilogo.reduce((s, x) => s + x.imp, 0)), imposta = round2(riepilogo.reduce((s, x) => s + x.iva, 0));
+  return { linee, riepilogo, imponibile, imposta, totale: round2(imponibile + imposta), bollo: bolloSi };
+}
+// Righe della fattura a partire da un conto: piatti, coperto e sconto, prezzi IVA compresa
+function righeDaVendita(S, v) {
+  const a = S.settings.iva, out = (v.righe || []).map(r => ({ desc: r.nome + (r.extra && r.nota ? " (" + r.nota + ")" : ""), q: r.q, prezzo: round2(r.prezzo), aliq: a }));
+  const somma = (v.righe || []).reduce((s, r) => s + r.q * r.prezzo, 0), cop = round2((v.lordo || 0) - somma);
+  if (cop > 0.004) { const n = v.coperti || 1, u = round2(cop / n), ok = Math.abs(u * n - cop) < 0.005; out.push({ desc: "Coperto", q: ok ? n : 1, prezzo: ok ? u : cop, aliq: a }); }
+  // lo sconto si ricava dal totale incassato, così la fattura torna al centesimo con il conto
+  const sc = round2((v.lordo || 0) - (v.tot || 0)); if (sc > 0.004) out.push({ desc: "Sconto", q: 1, prezzo: -sc, aliq: a });
+  return out;
+}
+function leggiCliente(c) {
+  c = c || {};
+  const tipo = c.tipo === "privato" ? "privato" : "azienda", naz = /^[A-Z]{2}$/.test(String(c.naz || "IT").toUpperCase()) ? String(c.naz || "IT").toUpperCase() : no("Nazione non valida (due lettere, es. IT)");
+  const x = { tipo, naz, den: latino(c.den, 80), nome: latino(c.nome, 60), cognome: latino(c.cognome, 60), piva: String(c.piva || "").replace(/\s/g, "").toUpperCase().replace(/^IT(?=\d{11}$)/, ""), cf: String(c.cf || "").replace(/\s/g, "").toUpperCase(),
+    ind: latino(c.ind, 60), civ: latino(c.civ, 8), cap: String(c.cap || "").trim(), com: latino(c.com, 60), prov: String(c.prov || "").trim().toUpperCase(), sdi: String(c.sdi || "").trim().toUpperCase(), pec: String(c.pec || "").trim().slice(0, 256), email: txt(c.email, 80) };
+  if (tipo === "azienda" && !x.den) no("Scrivi la ragione sociale del cliente");
+  if (tipo === "privato" && (!x.nome || !x.cognome)) no("Scrivi nome e cognome del cliente");
+  if (!x.ind || !x.com) no("Servono indirizzo e comune del cliente");
+  if (naz === "IT") {
+    if (tipo === "azienda") { if (!pivaOk(x.piva)) no("Partita IVA del cliente non valida: controlla le 11 cifre"); if (x.cf && !cfOk(x.cf)) no("Codice fiscale del cliente non valido"); }
+    else { if (!cfOk(x.cf)) no("Codice fiscale del cliente non valido: per un privato è obbligatorio"); if (x.piva && !pivaOk(x.piva)) no("Partita IVA del cliente non valida"); }
+    if (!/^\d{5}$/.test(x.cap)) no("CAP del cliente non valido (5 cifre)");
+    if (!/^[A-Z]{2}$/.test(x.prov)) no("Provincia del cliente: scrivi la sigla, es. CT");
+    if (x.sdi && !/^[A-Z0-9]{7}$/.test(x.sdi)) no("Il codice destinatario ha 7 caratteri (lettere e numeri)");
+    if (x.pec && !emailOk(x.pec)) no("PEC del cliente non valida");
+    if (tipo === "privato") x.sdi = x.sdi || "0000000";
+  } else {
+    if (tipo !== "azienda" || !/^[A-Z0-9]{2,28}$/.test(x.piva)) no("Per un cliente estero serve un'azienda con il suo numero di partita IVA");
+    x.sdi = "XXXXXXX"; x.pec = ""; x.prov = ""; if (!/^\d{5}$/.test(x.cap)) x.cap = "00000";
+  }
+  return x;
+}
+const nomeCliente = c => c ? (c.tipo === "privato" ? (c.nome + " " + c.cognome).trim() : c.den) : "";
+function nuovaFattura(S, u, o) {
+  const f = fisc(S); if (!fiscCompleti(f)) no("Prima completa i dati fiscali del locale in Impostazioni → Fatture elettroniche");
+  const oggi = dkey(Date.now()), data = dataOk(o.data) || oggi, anno = data.slice(0, 4); if (data > oggi) no("La data non può essere nel futuro");
+  if (data < dkey(new Date(oggi + "T12:00").getTime() - 60 * 864e5)) no("Data troppo vecchia: al massimo 60 giorni fa");
+  const ultima = S.fatture.filter(x => x.anno === anno).sort((a, b) => b.num - a.num)[0];
+  if (ultima && data < ultima.data) no(`La data non può essere prima dell'ultima fattura (n. ${ultima.numero} del ${ultima.data.split("-").reverse().join("/")})`);
+  S.contatori.fatt = S.contatori.fatt || {};
+  const num = Math.max(S.contatori.fatt[anno] || 0, ultima ? ultima.num : 0) + 1;
+  S.contatori.fatt[anno] = num; S.contatori.invio = (S.contatori.invio || 0) + 1;
+  const c = calcolaFattura(o.righe, f.regime, !!f.bolloCliente);
+  const x = Object.assign({ id: uid(), tipo: o.tipo || "TD01", anno, num, numero: String(num) + (f.suffisso ? f.suffisso : ""), data, creata: Date.now(), chi: u.nome, stato: "da_inviare",
+    prog: S.contatori.invio.toString(36).toUpperCase().padStart(5, "0"), ced: Object.assign({}, f), cli: o.cli, righe: o.righe, metodo: o.metodo || "", docComm: o.docComm || "", nota: o.nota || "", vid: o.vid || "", rif: o.rif || null }, c);
+  S.fatture.push(x);
+  return x;
+}
+function xmlFattura(x) {
+  const f = x.ced, c = x.cli, n2 = v => round2(v).toFixed(2), forf = FORFETTARI.includes(f.regime);
+  const el = (tag, v) => v === "" || v == null ? "" : `<${tag}>${xe(v)}</${tag}>`;
+  const sede = s => `<Sede>${el("Indirizzo", s.ind)}${el("NumeroCivico", s.civ)}${el("CAP", s.cap)}${el("Comune", s.com)}${el("Provincia", s.prov)}${el("Nazione", s.naz || "IT")}</Sede>`;
+  const cedAna = `<Anagrafica>${el("Denominazione", latino(f.den, 80))}</Anagrafica>`;
+  const cliAna = c.tipo === "privato" ? `<Anagrafica>${el("Nome", c.nome)}${el("Cognome", c.cognome)}</Anagrafica>` : `<Anagrafica>${el("Denominazione", c.den)}</Anagrafica>`;
+  const cliId = (c.piva ? `<IdFiscaleIVA><IdPaese>${c.naz}</IdPaese><IdCodice>${xe(c.piva)}</IdCodice></IdFiscaleIVA>` : "") + (c.naz === "IT" && c.cf ? el("CodiceFiscale", c.cf) : "");
+  const rea = f.reaUff && f.reaNum ? `<IscrizioneREA>${el("Ufficio", f.reaUff)}${el("NumeroREA", f.reaNum)}<StatoLiquidazione>LN</StatoLiquidazione></IscrizioneREA>` : "";
+  const contatti = f.tel || f.email ? `<Contatti>${el("Telefono", latino(f.tel, 12))}${el("Email", f.email)}</Contatti>` : "";
+  const causali = [];
+  if (forf) causali.push(CAUSALE_REGIME[f.regime]);
+  if (x.docComm) causali.push(latino("Riferimento documento commerciale: " + x.docComm, 200));
+  if (x.nota) causali.push(latino(x.nota, 200));
+  if (x.bollo && !x.linee.some(l => l.bollo)) causali.push("Imposta di bollo assolta in modo virtuale.");
+  const linee = x.linee.map(l => `<DettaglioLinee><NumeroLinea>${l.n}</NumeroLinea>${el("Descrizione", latino(l.desc, 1000) || "Articolo")}<Quantita>${(+l.q).toFixed(2)}</Quantita><PrezzoUnitario>${(+l.pu).toFixed(Math.max(2, Math.min(6, (String(l.pu).split(".")[1] || "").length)))}</PrezzoUnitario><PrezzoTotale>${n2(l.pt)}</PrezzoTotale><AliquotaIVA>${n2(l.aliq)}</AliquotaIVA>${el("Natura", l.natura)}</DettaglioLinee>`).join("");
+  const riep = x.riepilogo.map(r => `<DatiRiepilogo><AliquotaIVA>${n2(r.aliq)}</AliquotaIVA>${el("Natura", r.natura)}${r.arr ? `<Arrotondamento>${n2(r.arr)}</Arrotondamento>` : ""}<ImponibileImporto>${n2(r.imp)}</ImponibileImporto><Imposta>${n2(r.iva)}</Imposta>${r.natura ? "" : "<EsigibilitaIVA>I</EsigibilitaIVA>"}${r.natura ? el("RiferimentoNormativo", r.natura === "N1" ? "Escluso art.15 DPR 633/72" : RIF_NORMA[f.regime]) : ""}</DatiRiepilogo>`).join("");
+  const mp = PAG_FATT[x.metodo];
+  const pag = mp ? `<DatiPagamento><CondizioniPagamento>TP02</CondizioniPagamento><DettaglioPagamento><ModalitaPagamento>${mp}</ModalitaPagamento><ImportoPagamento>${n2(x.totale)}</ImportoPagamento>${mp === "MP05" && f.iban ? el("IBAN", f.iban) : ""}</DettaglioPagamento></DatiPagamento>` : "";
+  const collegate = x.rif ? `<DatiFattureCollegate>${el("IdDocumento", x.rif.numero)}${el("Data", x.rif.data)}</DatiFattureCollegate>` : "";
+  const dest = c.naz === "IT" ? (c.sdi || "0000000") : "XXXXXXX";
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<p:FatturaElettronica versione="FPR12" xmlns:ds="http://www.w3.org/2000/09/xmldsig#" xmlns:p="http://ivaservizi.agenziaentrate.gov.it/docs/xsd/fatture/v1.2" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://ivaservizi.agenziaentrate.gov.it/docs/xsd/fatture/v1.2 http://www.fatturapa.gov.it/export/fatturazione/sdi/fatturapa/v1.2/Schema_del_file_xml_FatturaPA_versione_1.2.xsd">
+<FatturaElettronicaHeader><DatiTrasmissione><IdTrasmittente><IdPaese>IT</IdPaese><IdCodice>${xe(f.cf || f.piva)}</IdCodice></IdTrasmittente><ProgressivoInvio>${x.prog}</ProgressivoInvio><FormatoTrasmissione>FPR12</FormatoTrasmissione><CodiceDestinatario>${dest}</CodiceDestinatario>${dest === "0000000" && c.pec ? el("PECDestinatario", c.pec) : ""}</DatiTrasmissione>
+<CedentePrestatore><DatiAnagrafici><IdFiscaleIVA><IdPaese>IT</IdPaese><IdCodice>${f.piva}</IdCodice></IdFiscaleIVA>${el("CodiceFiscale", f.cf)}${cedAna}<RegimeFiscale>${f.regime}</RegimeFiscale></DatiAnagrafici>${sede(f)}${rea}${contatti}</CedentePrestatore>
+<CessionarioCommittente><DatiAnagrafici>${cliId}${cliAna}</DatiAnagrafici>${sede(c)}</CessionarioCommittente></FatturaElettronicaHeader>
+<FatturaElettronicaBody><DatiGenerali><DatiGeneraliDocumento><TipoDocumento>${x.tipo}</TipoDocumento><Divisa>EUR</Divisa><Data>${x.data}</Data>${el("Numero", x.numero)}${x.bollo ? "<DatiBollo><BolloVirtuale>SI</BolloVirtuale><ImportoBollo>2.00</ImportoBollo></DatiBollo>" : ""}<ImportoTotaleDocumento>${n2(x.totale)}</ImportoTotaleDocumento>${causali.map(t => el("Causale", latino(t, 200))).join("")}</DatiGeneraliDocumento>${collegate}</DatiGenerali>
+<DatiBeniServizi>${linee}${riep}</DatiBeniServizi>${pag}</FatturaElettronicaBody>
+</p:FatturaElettronica>
+`;
+}
+const nomeFileFattura = x => `IT${x.ced.piva}_${x.prog}.xml`;
+
+/* ---------- HACCP (1.9) ----------
+   Registri dell'autocontrollo (Reg. CE 852/2004): temperature, merci in arrivo, pulizie, abbattimento,
+   olio di frittura, infestanti, non conformità. Le registrazioni non si cancellano: il titolare può solo annullarle,
+   e l'annullamento resta scritto con nome e motivo. */
+const TIPI_ATTR = {
+  frigo: { nome: "Frigorifero", min: 0, max: 4 }, pesce: { nome: "Frigo del pesce", min: -1, max: 2 }, congelatore: { nome: "Congelatore", min: -30, max: -18 },
+  vetrina: { nome: "Vetrina o banco frigo", min: 0, max: 4 }, bibite: { nome: "Frigo bibite", min: 0, max: 10 }, cella: { nome: "Cella frigorifera", min: 0, max: 4 }, caldo: { nome: "Banco caldo", min: 65, max: 95 }
+};
+const FREQ = { giorno: "Ogni giorno", settimana: "Ogni settimana", mese: "Ogni mese" };
+const AZIONI_CORR = ["Regolato il termostato e ricontrollato", "Spostati gli alimenti in un altro frigo", "Alimenti eliminati", "Chiamato il tecnico", "Porta rimasta aperta: chiusa e ricontrollato"];
+function haccpBase(S) {
+  const pul = [["Piani di lavoro, taglieri e utensili", "giorno"], ["Pavimenti di cucina e bancone", "giorno"], ["Lavelli, lavastoviglie e scarichi", "giorno"], ["Bagni", "giorno"],
+    ["Interno dei frigoriferi", "settimana"], ["Forni, piastre e friggitrici", "settimana"], ["Cappa e filtri", "mese"], ["Pareti, porte e maniglie", "mese"]].map(([area, freq]) => ({ id: uid(), area, freq, prodotto: "" }));
+  const attr = [{ id: uid(), nome: "Frigorifero cucina", tipo: "frigo", min: 0, max: 4, attiva: true }, { id: uid(), nome: "Congelatore", tipo: "congelatore", min: -30, max: -18, attiva: true }];
+  if (S.settings.moduli && S.settings.moduli.cucina === false) attr[0].nome = "Frigorifero";
+  return { conf: { resp: "", controlli: 2, orari: ["10:00", "18:00"], acqua: "rete", infestDitta: "", infestFreq: "mese", crudi: false, rev: 1, revData: "", note: "" }, attr, pul, form: [] };
+}
+const fasciaDi = (S, t) => S.haccp.conf.controlli === 1 ? "giorno" : new Date(t).getHours() < 15 ? "apertura" : "chiusura";
+const tempNum = v => { const n = Number(String(v == null ? "" : v).replace(",", ".").trim()); return String(v).trim() !== "" && isFinite(n) && n >= -50 && n <= 120 ? Math.round(n * 10) / 10 : null; };
+function registra(S, u, k, dati) {
+  const r = Object.assign({ id: uid(), t: Date.now(), g: dkey(Date.now()), k, c: u.nome }, dati);
+  S.haccpReg.push(r); return r;
+}
+// controlli di temperatura che mancano oggi (per il promemoria e il riepilogo serale)
+function haccpMancanti(S, ora) {
+  if (!S.settings.moduli.haccp || !S.haccp) return [];
+  ora = ora || Date.now(); const oggi = dkey(ora), c = S.haccp.conf, hm = hhmm(ora);
+  const fasce = c.controlli === 1 ? [["giorno", c.orari[0] || "10:00"]] : [["apertura", c.orari[0] || "10:00"], ["chiusura", c.orari[1] || "18:00"]];
+  const fatti = new Set(S.haccpReg.filter(r => r.k === "temp" && r.g === oggi && !r.x).map(r => r.a + "|" + r.f));
+  const out = [];
+  S.haccp.attr.filter(a => a.attiva !== false).forEach(a => fasce.forEach(([f, h]) => { if (hm >= h && !fatti.has(a.id + "|" + f)) out.push({ a: a.id, nome: a.nome, f }); }));
+  return out;
+}
+function formazioneInScadenza(S, ora) {
+  const lim = dkey((ora || Date.now()) + 30 * 864e5);
+  return (S.haccp ? S.haccp.form : []).filter(f => f.scadenza && f.scadenza <= lim);
+}
+
 /* ---------- Dati nuovi (1.8) su locali creati con versioni precedenti ---------- */
-const ELENCHI_18 = ["clienti", "turni", "presenze", "attesa", "richiesteQr"];
+const ELENCHI_18 = ["clienti", "turni", "presenze", "attesa", "richiesteQr", "fatture", "intestatari", "haccpReg"];
 function normalizza(S) {
   if (!S) return S;
   ELENCHI_18.forEach(k => { if (!Array.isArray(S[k])) S[k] = []; });
+  if (!S.haccp) S.haccp = haccpBase(S);
+  { const lim = Date.now() - 3 * 365 * 864e5; if (S.haccpReg.length && S.haccpReg[0].t < lim) S.haccpReg = S.haccpReg.filter(r => r.t >= lim); if (S.haccpReg.length > 40000) S.haccpReg = S.haccpReg.slice(-40000); }
   S.tavoli.forEach(t => { if (!t.consegna && !t.qrk) t.qrk = crypto.randomBytes(5).toString("hex"); });
   const ora = Date.now();
   // richieste dal QR: quelle in attesa scadono dopo 3 ore, lo storico resta 24 ore
@@ -278,6 +474,10 @@ function testoRiepilogo(S, V, data) {
   if (S.settings.moduli.magazzino) { const low = S.ing.filter(g => g.qta <= g.soglia).map(g => g.nome); if (low.length) r.push("", "Da riordinare: " + low.slice(0, 12).join(", ") + (low.length > 12 ? "…" : "")); }
   if (S.settings.moduli.prenotazioni) { const dom = dkey(new Date(data + "T12:00").getTime() + 864e5), pr = S.prenotazioni.filter(p => p.data === dom && p.stato === "attesa"); r.push("", pr.length ? `Prenotazioni domani: ${pr.length} (${pr.reduce((s, p) => s + (+p.persone || 0), 0)} persone)` : "Nessuna prenotazione per domani"); }
   if (S.settings.moduli.clienti) { const n = new Set(V.map(v => v.cliente).filter(Boolean)).size; if (n) r.push(`Clienti abituali passati oggi: ${n}`); }
+  if (S.settings.moduli.haccp && S.haccp) {
+    const reg = S.haccpReg.filter(x => x.g === data && !x.x), nc = reg.filter(x => !x.o).length, manc = haccpMancanti(S, Math.min(Date.now(), new Date(data + "T23:59").getTime())).length;
+    r.push("", `HACCP: ${reg.filter(x => x.k === "temp").length} temperature registrate${manc ? ` · *${manc} controlli mancanti*` : ""}${nc ? ` · *${nc} non conformità*` : ""}`);
+  }
   r.push("", "_Inviato da Tavolo_");
   return r.join("\n");
 }
@@ -483,8 +683,10 @@ const AZIONI = {
     const tr = {}; for (const l of Object.keys(LINGUE)) { const v = txt(d.tr && d.tr[l], 60); if (v) tr[l] = v; }
     if (!tr.en && txt(d.en, 60) && !(d.tr && "en" in d.tr)) tr.en = txt(d.en, 60);
     const en = tr.en || "";
-    if (d.id) { const m = M(S, d.id) || no("Piatto non trovato"); if (m.prezzo !== prezzo) log(S, u, `Prezzo ${m.nome}: ${eur(m.prezzo)} → ${eur(prezzo)}`); Object.assign(m, { nome, prezzo: round2(prezzo), cat: d.cat, all, ing, var: vari, en, tr }); }
-    else { S.menu.push({ id: uid(), nome, prezzo: round2(prezzo), cat: d.cat, all, ing, var: vari, disp: true, en, tr }); log(S, u, `Nuovo piatto: ${nome}`); }
+    const desc = txt(d.desc, 200), descTr = {}; for (const l of Object.keys(LINGUE)) { const v = txt(d.descTr && d.descTr[l], 200); if (v) descTr[l] = v; }
+    const surg = !!d.surg;
+    if (d.id) { const m = M(S, d.id) || no("Piatto non trovato"); if (m.prezzo !== prezzo) log(S, u, `Prezzo ${m.nome}: ${eur(m.prezzo)} → ${eur(prezzo)}`); Object.assign(m, { nome, prezzo: round2(prezzo), cat: d.cat, all, ing, var: vari, en, tr, desc, descTr, surg }); }
+    else { S.menu.push({ id: uid(), nome, prezzo: round2(prezzo), cat: d.cat, all, ing, var: vari, disp: true, en, tr, desc, descTr, surg }); log(S, u, `Nuovo piatto: ${nome}`); }
   }],
   "menu.elimina": ["admin", (S, p, u) => { const m = M(S, p.mid) || no("Piatto non trovato"); if (S.tavoli.some(t => t.righe.some(r => r.mid === m.id))) no("Il piatto è in un conto aperto: chiudi prima quel tavolo"); S.menu = S.menu.filter(x => x !== m); log(S, u, `Piatto eliminato: ${m.nome}`); }],
   "cat.nuova": ["admin", (S, p) => { const n = txt(p.nome, 40); if (!n) no("Scrivi il nome della categoria"); if (S.categorie.some(c => c.nome.toLowerCase() === n.toLowerCase())) no("Esiste già"); S.categorie.push({ nome: n, rep: REPARTI.includes(p.rep) ? p.rep : "Cucina" }); }],
@@ -671,7 +873,7 @@ const AZIONI = {
   }],
   "imp.aspetto": ["admin", (S, p) => { if (/^#[0-9a-fA-F]{6}$/.test(p.accent || "")) S.settings.accent = p.accent; if (["auto", "chiaro", "scuro"].includes(p.tema)) S.settings.tema = p.tema; }],
   "imp.modulo": ["admin", (S, p, u, out, ctx) => {
-    const k = p.k; if (!["prenotazioni", "magazzino", "cucina", "consegne", "ai", "qr", "clienti", "turni", "attesa"].includes(k)) no("Modulo non valido");
+    const k = p.k; if (!["prenotazioni", "magazzino", "cucina", "consegne", "ai", "qr", "clienti", "turni", "attesa", "haccp"].includes(k)) no("Modulo non valido");
     if (!S.settings.moduli[k] && ctx.piano === "bar" && (k === "cucina" || k === "magazzino")) no("Questo modulo è incluso dal piano Ristorante: contatta l'assistenza");
     S.settings.moduli[k] = !S.settings.moduli[k]; log(S, u, `Modulo ${k} ${S.settings.moduli[k] ? "attivato" : "spento"}`);
     if (k === "cucina" && !S.settings.moduli.cucina && S.staff.some(x => x.ruolo === "cucina")) out.msg = "Cucina e bar spento: chi ha il ruolo Cucina non vedrà più le comande";
@@ -747,6 +949,167 @@ const AZIONI = {
     const pm = presetMenu(k); pm.menu.forEach(m => m.ing = m.ing.filter(([id]) => ING(S, id)));
     S.menu = pm.menu; S.categorie = pm.cat; log(S, u, "Caricato modello " + k);
   }],
+  /* ----- Fatture (1.9) ----- */
+  "imp.fisc": ["admin", (S, p, u, out) => {
+    const d = p.fisc || {}, piva = String(d.piva || "").replace(/\s/g, "").replace(/^IT/i, ""), cf = String(d.cf || "").replace(/\s/g, "").toUpperCase();
+    const f = { den: latino(d.den, 80), piva, cf, regime: REGIMI[d.regime] ? d.regime : "RF01", ind: latino(d.ind, 60), civ: latino(d.civ, 8), cap: String(d.cap || "").trim(), com: latino(d.com, 60), prov: String(d.prov || "").trim().toUpperCase(), naz: "IT",
+      tel: txt(d.tel, 12), email: txt(d.email, 80), iban: String(d.iban || "").replace(/\s/g, "").toUpperCase(), reaUff: String(d.reaUff || "").trim().toUpperCase(), reaNum: latino(d.reaNum, 20), bolloCliente: !!d.bolloCliente, suffisso: latino(d.suffisso, 8) };
+    if (!f.den) no("Scrivi la denominazione o ragione sociale"); if (!pivaOk(f.piva)) no("Partita IVA del locale non valida: controlla le 11 cifre");
+    if (f.cf && !cfOk(f.cf)) no("Codice fiscale non valido"); if (!f.ind || !f.com) no("Servono indirizzo e comune della sede");
+    if (!/^\d{5}$/.test(f.cap)) no("CAP non valido (5 cifre)"); if (!/^[A-Z]{2}$/.test(f.prov)) no("Provincia: scrivi la sigla, es. CT");
+    if (f.email && !emailOk(f.email)) no("Email non valida"); if (f.iban && !/^IT\d{2}[A-Z]\d{10}[A-Z0-9]{12}$/.test(f.iban)) no("IBAN non valido");
+    if ((f.reaUff || f.reaNum) && (!/^[A-Z]{2}$/.test(f.reaUff) || !f.reaNum)) no("REA: servono la sigla della provincia e il numero");
+    if (f.suffisso && !/^[\/\-A-Za-z0-9]+$/.test(f.suffisso)) no("Il suffisso del numero può avere solo lettere, numeri, / e -");
+    S.settings.fisc = f;
+    if (p.prossimo != null && p.prossimo !== "") {
+      const anno = dkey(Date.now()).slice(0, 4), n = num(p.prossimo, 1, 999999); if (n == null || n % 1) no("Numero della prossima fattura non valido");
+      const max = Math.max(0, ...S.fatture.filter(x => x.anno === anno).map(x => x.num));
+      if (n <= max) no(`In Tavolo c'è già la fattura n. ${max} del ${anno}: il prossimo numero deve essere almeno ${max + 1}`);
+      S.contatori.fatt = S.contatori.fatt || {}; S.contatori.fatt[anno] = n - 1;
+    }
+    log(S, u, "Dati per le fatture aggiornati"); out.msg = "Dati per le fatture salvati";
+  }],
+  "fatt.crea": ["cassa", (S, p, u, out) => {
+    const cli = leggiCliente(p.cli);
+    const righe = (Array.isArray(p.righe) ? p.righe : []).slice(0, 200).map(r => {
+      const q = num(String(r.q).replace(",", "."), 0.01, 10000), prezzo = num(String(r.prezzo).replace(",", "."), -100000, 100000), aliq = +r.aliq;
+      const desc = latino(r.desc, 200);
+      if (!desc) no("Ogni riga vuole una descrizione"); if (q == null) no(`Quantità non valida per "${desc}"`); if (prezzo == null || prezzo === 0) no(`Prezzo non valido per "${desc}"`);
+      if (!forfettario(S) && !ALIQUOTE.includes(aliq)) no(`Aliquota IVA non valida per "${desc}"`);
+      return { desc, q: Math.round(q * 100) / 100, prezzo: round2(prezzo), aliq: forfettario(S) ? 0 : aliq };
+    });
+    if (!righe.length) no("La fattura è vuota");
+    if (round2(righe.reduce((s, r) => s + r.prezzo * r.q, 0)) <= 0) no("Il totale della fattura deve essere maggiore di zero");
+    const v = p.vid ? S.vendite.find(x => x.id === p.vid) : null;
+    if (p.vid && v && v.fatt) no(`Questo conto ha già la fattura n. ${v.fatt}`);
+    const x = nuovaFattura(S, u, { cli, righe, data: p.data, metodo: v ? v.metodo : (PAG_FATT[p.metodo] ? p.metodo : ""), docComm: latino(p.docComm, 80), nota: latino(p.nota, 200), vid: v ? v.id : "" });
+    if (v) v.fatt = x.numero;
+    // rubrica: per ritrovare l'intestatario la prossima volta
+    const chiave = cli.piva || cli.cf; S.intestatari = S.intestatari.filter(y => (y.piva || y.cf) !== chiave);
+    S.intestatari.unshift(Object.assign({ ultima: Date.now() }, cli)); S.intestatari.length = Math.min(S.intestatari.length, 500);
+    log(S, u, `Fattura n. ${x.numero} a ${nomeCliente(cli)}: ${eur(x.totale)}`);
+    out.nuovoId = x.id; out.msg = `Fattura n. ${x.numero} creata: scarica il file XML e caricalo sul portale Fatture e Corrispettivi`;
+  }],
+  "fatt.nc": ["cassa", (S, p, u, out) => {
+    const o = S.fatture.find(x => x.id === p.id) || no("Fattura non trovata");
+    if (o.tipo !== "TD01") no("La nota di credito si fa solo su una fattura"); if (o.nc) no(`Questa fattura ha già la nota di credito n. ${o.nc}`);
+    const x = nuovaFattura(S, u, { tipo: "TD04", cli: o.cli, righe: o.righe, data: p.data, metodo: "", nota: latino(p.nota || `Storno totale della fattura n. ${o.numero} del ${o.data.split("-").reverse().join("/")}`, 200), rif: { numero: o.numero, data: o.data } });
+    o.nc = x.numero; log(S, u, `Nota di credito n. ${x.numero} sulla fattura n. ${o.numero}`);
+    out.nuovoId = x.id; out.msg = `Nota di credito n. ${x.numero} creata`;
+  }],
+  "fatt.stato": ["cassa", (S, p, u) => {
+    const x = S.fatture.find(y => y.id === p.id) || no("Fattura non trovata");
+    x.stato = x.stato === "inviata" ? "da_inviare" : "inviata"; x.inviata = x.stato === "inviata" ? Date.now() : null;
+    log(S, u, `Fattura n. ${x.numero} segnata come ${x.stato === "inviata" ? "inviata" : "da inviare"}`);
+  }],
+  "fatt.elimina": ["cassa", (S, p, u, out) => {
+    const x = S.fatture.find(y => y.id === p.id) || no("Fattura non trovata");
+    if (x.stato === "inviata") no("Fattura già inviata: per annullarla serve una nota di credito");
+    const ultima = S.fatture.filter(y => y.anno === x.anno).sort((a, b) => b.num - a.num)[0];
+    if (ultima !== x) no("Si può cancellare solo l'ultima fattura dell'anno, per non lasciare buchi nella numerazione. Per le altre fai una nota di credito");
+    S.fatture = S.fatture.filter(y => y !== x); if (S.contatori.fatt && S.contatori.fatt[x.anno] === x.num) S.contatori.fatt[x.anno] = x.num - 1;
+    if (x.vid) { const v = S.vendite.find(y => y.id === x.vid); if (v && v.fatt === x.numero) delete v.fatt; }
+    if (x.rif) { const o = S.fatture.find(y => y.numero === x.rif.numero && y.data === x.rif.data); if (o && o.nc === x.numero) delete o.nc; }
+    log(S, u, `${x.tipo === "TD04" ? "Nota di credito" : "Fattura"} n. ${x.numero} cancellata prima dell'invio`); out.msg = "Cancellata";
+  }],
+  "fatt.rubricaTogli": ["cassa", (S, p) => { S.intestatari = S.intestatari.filter(y => (y.piva || y.cf) !== p.k); }],
+
+  /* ----- HACCP (1.9) ----- */
+  "haccp.conf": ["admin", (S, p, u) => {
+    const c = S.haccp.conf, d = p.conf || {};
+    c.resp = txt(d.resp, 60); c.controlli = +d.controlli === 1 ? 1 : 2;
+    const o = (Array.isArray(d.orari) ? d.orari : []).map(oraOk); if (o.some(x => !x)) no("Orari dei controlli non validi"); if (o.length) c.orari = o;
+    c.acqua = d.acqua === "pozzo" ? "pozzo" : "rete"; c.infestDitta = txt(d.infestDitta, 80); c.infestFreq = FREQ[d.infestFreq] ? d.infestFreq : "mese";
+    c.crudi = !!d.crudi; c.note = txt(d.note, 600); log(S, u, "Impostazioni HACCP aggiornate");
+  }],
+  "haccp.rev": ["admin", (S, p, u) => { const c = S.haccp.conf; c.rev = (c.rev || 0) + (c.revData ? 1 : 0); c.revData = dkey(Date.now()); log(S, u, `Piano HACCP: revisione ${c.rev} del ${c.revData}`); }],
+  "haccp.attr.salva": ["admin", (S, p, u) => {
+    const d = p.attr || {}, nome = txt(d.nome, 40) || no("Dai un nome all'attrezzatura"), tipo = TIPI_ATTR[d.tipo] ? d.tipo : "frigo";
+    const min = tempNum(d.min), max = tempNum(d.max); if (min == null || max == null) no("Scrivi la temperatura minima e massima"); if (min >= max) no("La minima deve essere più bassa della massima");
+    if (d.id) { const a = S.haccp.attr.find(x => x.id === d.id) || no("Attrezzatura non trovata"); Object.assign(a, { nome, tipo, min, max }); }
+    else { if (S.haccp.attr.filter(x => x.attiva !== false).length >= 30) no("Al massimo 30 attrezzature"); S.haccp.attr.push({ id: uid(), nome, tipo, min, max, attiva: true }); }
+    log(S, u, `HACCP: ${nome} da ${min} a ${max} °C`);
+  }],
+  // le attrezzature tolte restano nei registri passati, non compaiono più nei controlli
+  "haccp.attr.togli": ["admin", (S, p, u) => { const a = S.haccp.attr.find(x => x.id === p.id) || no("Attrezzatura non trovata"); a.attiva = false; log(S, u, `HACCP: tolta l'attrezzatura ${a.nome}`); }],
+  "haccp.pul.salva": ["admin", (S, p) => {
+    const d = p.pul || {}, area = txt(d.area, 60) || no("Scrivi cosa si pulisce"), freq = FREQ[d.freq] ? d.freq : "giorno", prodotto = txt(d.prodotto, 60);
+    if (d.id) Object.assign(S.haccp.pul.find(x => x.id === d.id) || no("Voce non trovata"), { area, freq, prodotto }); else S.haccp.pul.push({ id: uid(), area, freq, prodotto });
+  }],
+  "haccp.pul.togli": ["admin", (S, p) => { S.haccp.pul = S.haccp.pul.filter(x => x.id !== p.id); }],
+  "haccp.form.salva": ["admin", (S, p) => {
+    const d = p.form || {}, nome = txt(d.nome, 50) || no("Scrivi il nome della persona");
+    const data = d.data ? dataOk(d.data) || no("Data dell'attestato non valida") : "", scadenza = d.scadenza ? dataOk(d.scadenza) || no("Data di scadenza non valida") : "";
+    const x = { nome, mansione: txt(d.mansione, 40), data, scadenza, ente: txt(d.ente, 60) };
+    if (d.id) Object.assign(S.haccp.form.find(y => y.id === d.id) || no("Persona non trovata"), x); else S.haccp.form.push(Object.assign({ id: uid() }, x));
+  }],
+  "haccp.form.togli": ["admin", (S, p) => { S.haccp.form = S.haccp.form.filter(x => x.id !== p.id); }],
+  "haccp.temp": ["tutti", (S, p, u, out) => {
+    if (!S.settings.moduli.haccp) no("Il modulo HACCP è spento");
+    const a = S.haccp.attr.find(x => x.id === p.a && x.attiva !== false) || no("Scegli l'attrezzatura"), v = tempNum(p.v);
+    if (v == null) no("Scrivi la temperatura letta sul termometro, es. 3 oppure -19");
+    const ok = v >= a.min && v <= a.max, n = txt(p.n, 200);
+    if (!ok && !n) no(`${v} °C è fuori dai limiti (${a.min} / ${a.max} °C): scrivi cosa hai fatto`);
+    registra(S, u, "temp", { a: a.id, an: a.nome, v, min: a.min, max: a.max, o: ok, f: fasciaDi(S, Date.now()), n });
+    if (!ok) log(S, u, `HACCP: ${a.nome} a ${v} °C, fuori limite. ${n}`);
+    out.msg = ok ? `${a.nome}: ${String(v).replace(".", ",")} °C registrati` : `${a.nome}: non conformità registrata`;
+  }],
+  "haccp.merce": ["tutti", (S, p, u, out) => {
+    if (!S.settings.moduli.haccp) no("Il modulo HACCP è spento");
+    const forn = txt(p.forn, 60) || no("Scrivi il fornitore"), prod = txt(p.prod, 80) || no("Scrivi il prodotto");
+    const t = p.temp === "" || p.temp == null ? null : tempNum(p.temp); if (p.temp !== "" && p.temp != null && t == null) no("Temperatura non valida");
+    const ok = p.conf !== false && p.conf !== "no", n = txt(p.n, 200); if (!ok && !n) no("Merce non conforme: scrivi cosa hai fatto (es. respinta al fornitore)");
+    registra(S, u, "merce", { forn, prod, lotto: txt(p.lotto, 40), scad: p.scad ? dataOk(p.scad) || "" : "", temp: t, o: ok, n });
+    out.msg = ok ? "Merce registrata" : "Merce non conforme registrata";
+  }],
+  "haccp.pulizia": ["tutti", (S, p, u, out) => {
+    if (!S.settings.moduli.haccp) no("Il modulo HACCP è spento");
+    const x = S.haccp.pul.find(y => y.id === p.p) || no("Voce del piano non trovata");
+    registra(S, u, "pulizia", { p: x.id, pn: x.area, o: true, n: txt(p.n, 120) }); out.msg = `${x.area}: fatto`;
+  }],
+  "haccp.abbatt": ["tutti", (S, p, u, out) => {
+    if (!S.settings.moduli.haccp) no("Il modulo HACCP è spento");
+    const prod = txt(p.prod, 80) || no("Scrivi il prodotto"), tipo = p.tipo === "surg" ? "surg" : "refr";
+    const t0 = tempNum(p.t0), t1 = tempNum(p.t1), min = num(p.min, 1, 1440);
+    if (t0 == null || t1 == null) no("Scrivi la temperatura al cuore all'inizio e alla fine"); if (min == null) no("Scrivi quanti minuti è durato");
+    const ok = tipo === "refr" ? t1 <= 3 && min <= 90 : t1 <= -18 && min <= 240, n = txt(p.n, 200);
+    if (!ok && !n) no(tipo === "refr" ? "Serve +3 °C al cuore entro 90 minuti: scrivi cosa hai fatto" : "Serve -18 °C al cuore entro 4 ore: scrivi cosa hai fatto");
+    registra(S, u, "abbatt", { prod, tipo, t0, t1, min: Math.round(min), o: ok, n }); out.msg = ok ? "Abbattimento registrato" : "Non conformità registrata";
+  }],
+  "haccp.olio": ["tutti", (S, p, u, out) => {
+    if (!S.settings.moduli.haccp) no("Il modulo HACCP è spento");
+    const fr = txt(p.fr, 40) || "Friggitrice", az = p.az === "cambio" ? "cambio" : "controllo";
+    const v = p.v === "" || p.v == null ? null : num(String(p.v).replace(",", "."), 0, 60); if (p.v !== "" && p.v != null && v == null) no("Valore dei composti polari non valido (0-60%)");
+    const ok = az === "cambio" || v == null || v <= 25, n = txt(p.n, 200); if (!ok && !n) no("Oltre il 25% di composti polari l'olio va cambiato: scrivi cosa hai fatto");
+    registra(S, u, "olio", { fr, az, v, o: ok, n }); out.msg = az === "cambio" ? "Cambio olio registrato" : ok ? "Controllo olio registrato" : "Non conformità registrata";
+  }],
+  "haccp.infest": ["tutti", (S, p, u, out) => {
+    if (!S.settings.moduli.haccp) no("Il modulo HACCP è spento");
+    const ok = p.ok !== false, n = txt(p.n, 200); if (!ok && !n) no("Scrivi cosa hai trovato e cosa hai fatto");
+    registra(S, u, "infest", { o: ok, n, ditta: !!p.ditta }); out.msg = "Controllo infestanti registrato";
+  }],
+  "haccp.nc": ["tutti", (S, p, u, out) => {
+    if (!S.settings.moduli.haccp) no("Il modulo HACCP è spento");
+    const n = txt(p.n, 300) || no("Descrivi il problema e cosa hai fatto");
+    registra(S, u, "nc", { o: false, n }); log(S, u, "HACCP: non conformità " + n.slice(0, 80)); out.msg = "Non conformità registrata";
+  }],
+  "haccp.annulla": ["admin", (S, p, u) => {
+    const r = S.haccpReg.find(x => x.id === p.id) || no("Registrazione non trovata"); if (r.x) no("Già annullata");
+    const m = txt(p.motivo, 120) || no("Scrivi perché la annulli (es. valore scritto sbagliato)");
+    r.x = { chi: u.nome, t: Date.now(), m }; log(S, u, `HACCP: annullata una registrazione (${m})`);
+  }],
+  /* ----- Menu da stampare (1.9) ----- */
+  "imp.menuStampa": ["admin", (S, p) => {
+    const d = p.conf || {};
+    const cats = new Set(S.categorie.map(c => c.nome)), ids = new Set(S.menu.map(m => m.id));
+    S.settings.menuStampa = {
+      titolo: txt(d.titolo, 60), sotto: txt(d.sotto, 120), testoSu: txt(d.testoSu, 300), testoGiu: txt(d.testoGiu, 400),
+      stile: ["classico", "moderno", "trattoria"].includes(d.stile) ? d.stile : "classico", formato: ["A4", "A5", "A4x2"].includes(d.formato) ? d.formato : "A4",
+      colonne: [1, 2].includes(+d.colonne) ? +d.colonne : 1, lingua: ["it", ...Object.keys(LINGUE)].includes(d.lingua) ? d.lingua : "it", bi: !!d.bi,
+      desc: d.desc !== false, all: d.all !== false, prezzi: d.prezzi !== false, coperto: d.coperto !== false, esauriti: !!d.esauriti, unaPagina: d.unaPagina !== false,
+      escluse: (Array.isArray(d.escluse) ? d.escluse : []).filter(c => cats.has(c)).slice(0, 100), nascosti: (Array.isArray(d.nascosti) ? d.nascosti : []).filter(id => ids.has(id)).slice(0, 1000)
+    };
+  }],
   "imp.stampanti": ["admin", (S, p, u) => {
     const st = {}; ["Cucina", "Pizzeria", "Bar", "Sala"].forEach(k => { const v = txt((p.stampanti || {})[k], 60); if (v && !/^[\w.\-]+(:\d{1,5})?$/.test(v)) no(`Indirizzo della stampante ${k} non valido (es. 192.168.1.50 o 192.168.1.50:9100)`); st[k] = v; });
     S.settings.stampanti = st; S.settings.stampaAuto = !!p.auto; const c = parseInt(p.colonne, 10); if ([32, 42, 48].includes(c)) S.settings.colonne = c;
@@ -786,7 +1149,7 @@ function validaBackup(o) {
     && o.staff.some(s => s.ruolo === "titolare" && s.pinHash);
 }
 
-module.exports = { normalizza, testoRiepilogo, telNorm, puntiConf, LINGUE, posGriglia, piattaforme, PIATTAFORME_BASE, giorno, ORA_CAMBIO_GIORNO, prezzoRiga, REPARTI, RUOLI, METODI, ALLERGENI, ALLERGENI_EN, AZIONI, ACCESSO, applica, creaStato, presetMenu, statoPubblico, verificaPin, hashPin, validaBackup, testoComanda, testoPreconto, testoAvviso, dkey, eur, round2, uid };
+module.exports = { haccpMancanti, formazioneInScadenza, TIPI_ATTR, FREQ, AZIONI_CORR, pivaOk, cfOk, calcolaFattura, righeDaVendita, xmlFattura, nomeFileFattura, nomeCliente, fiscCompleti, REGIMI, ALIQUOTE, FORFETTARI, SOGLIA_BOLLO, latino, normalizza, testoRiepilogo, telNorm, puntiConf, LINGUE, posGriglia, piattaforme, PIATTAFORME_BASE, giorno, ORA_CAMBIO_GIORNO, prezzoRiga, REPARTI, RUOLI, METODI, ALLERGENI, ALLERGENI_EN, AZIONI, ACCESSO, applica, creaStato, presetMenu, statoPubblico, verificaPin, hashPin, validaBackup, testoComanda, testoPreconto, testoAvviso, dkey, eur, round2, uid };
 
 })(require, module, Buffer);
   var L = module.exports;
@@ -797,8 +1160,11 @@ module.exports = { normalizza, testoRiepilogo, telNorm, puntiConf, LINGUE, posGr
   function scrivi(o) { mem = o; try { localStorage.setItem(KEY, JSON.stringify(o)); } catch (e) {} }
   function nuovo() {
     var S = L.normalizza(L.creaStato({ demo: true, pin: "1111" }));
-    ["qr", "clienti", "turni", "attesa"].forEach(function (k) { if (S.settings.moduli && k in S.settings.moduli) S.settings.moduli[k] = true; else if (S.settings.moduli) S.settings.moduli[k] = true; });
+    ["qr", "clienti", "turni", "attesa", "haccp"].forEach(function (k) { if (S.settings.moduli && k in S.settings.moduli) S.settings.moduli[k] = true; else if (S.settings.moduli) S.settings.moduli[k] = true; });
     L.normalizza(S);
+    // dati fiscali d'esempio (inventati), così nella demo si possono provare le fatture
+    if (!S.settings.fisc) S.settings.fisc = { den: "Trattoria Da Melo (esempio)", piva: "01234567897", cf: "", regime: "RF01", ind: "Via Etnea", civ: "1", cap: "95100", com: "Catania", prov: "CT", naz: "IT", tel: "", email: "", iban: "", reaUff: "", reaNum: "", bolloCliente: false, suffisso: "" };
+    if (S.haccp && S.haccp.conf && !S.haccp.conf.resp) S.haccp.conf.resp = "Melo (titolare)";
     return { creato: Date.now(), S: S, sessioni: {}, mesi: [] };
   }
   var D = leggi();
@@ -821,6 +1187,9 @@ module.exports = { normalizza, testoRiepilogo, telNorm, puntiConf, LINGUE, posGr
       aggiornamento: { configurato: false, auto: true }, traduzione: { servizio: "mymemory", chiave: false }, ai: { chiave: false, usate: 0, modelloPredefinito: "" },
       paginaPrenota: "", copiaEsterna: { docker: false, cartella: "", ora: null, file: null, errore: null } } });
     if (u.ruolo === "cucina") dati.clienti = [];
+    { var limH = L.dkey(Date.now() - 10 * 864e5); dati.haccpReg = (D.S.haccpReg || []).filter(function (r) { return r.g >= limH; }); }
+    if (["titolare", "cassa"].indexOf(u.ruolo) < 0) { dati.fatture = []; dati.intestatari = []; }
+    else { dati.fatture = (D.S.fatture || []).map(function (f) { var c = Object.assign({}, f); delete c.ced; return c; }); dati.fattureTot = dati.fatture.length; dati.intestatari = D.S.intestatari || []; }
     if (u.ruolo !== "titolare") dati.presenze = (dati.presenze || []).filter(function (x) { return x.sid === u.id; });
     c.emit("stato", dati);
   }
@@ -919,6 +1288,22 @@ module.exports = { normalizza, testoRiepilogo, telNorm, puntiConf, LINGUE, posGr
       if (r2.stampe && r2.stampe.length) setTimeout(function () { avvisa("Demo: la comanda andrebbe in stampa su " + r2.stampe.map(function (s) { return s.dest; }).join(", ")); }, 300);
       salva(); diffondi();
       return json(200, { ok: true, msg: r2.msg, nuovoId: r2.nuovoId, riepilogo: r2.riepilogo });
+    }
+    var cassa = u && ["titolare", "cassa"].indexOf(u.ruolo) >= 0;
+    if (p === "/api/haccp") {
+      var mese = url.searchParams.get("mese") || ""; if (!/^\d{4}-\d{2}$/.test(mese)) return json(400, { errore: "Mese non valido" });
+      return json(200, { mese: mese, registro: (S.haccpReg || []).filter(function (r) { return r.g.indexOf(mese) === 0; }) });
+    }
+    if (p === "/api/fatture") {
+      if (!cassa) return json(403, { errore: "Solo cassa e titolare" });
+      var anno = url.searchParams.get("anno") || "", anni = [];
+      (S.fatture || []).forEach(function (f) { if (anni.indexOf(f.anno) < 0) anni.push(f.anno); }); anni.sort().reverse();
+      return json(200, { anni: anni, fatture: (S.fatture || []).filter(function (f) { return f.anno === anno; }).map(function (f) { var c = Object.assign({}, f); delete c.ced; delete c.righe; delete c.linee; return c; }) });
+    }
+    if (p === "/api/fattura") {
+      if (!cassa) return json(403, { errore: "Solo cassa e titolare" });
+      var fx = (S.fatture || []).find(function (f) { return f.id === url.searchParams.get("id"); });
+      return fx ? json(200, fx) : json(404, { errore: "Fattura non trovata" });
     }
     if (p === "/api/riepilogo") return json(200, { testo: L.testoRiepilogo(S, S.vendite, L.giorno(Date.now())) });
     if (p === "/api/rt/invia") {
