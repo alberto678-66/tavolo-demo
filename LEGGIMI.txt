@@ -1,6 +1,5 @@
-TAVOLO DEMO 1.9.0 - app da installare su tablet e telefono
+TAVOLO DEMO - app da condividere con un link
 
-Cartella da caricare su GitHub Pages (repository tavolo-demo).
-Contiene solo la demo: nessuna chiave, nessun token, nessun programma di controllo.
-I dati della demo restano sul dispositivo di chi la prova e si azzerano dopo 3 giorni.
-Novita 1.9.0: fatture elettroniche, menu da stampare, HACCP con temperature e manuale.
+Cartella da caricare su GitHub Pages. Contiene solo la demo:
+nessuna chiave, nessun token, nessun programma di controllo.
+I dati della demo restano sul telefono di chi la prova e si azzerano dopo 3 giorni.

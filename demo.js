@@ -9,7 +9,7 @@
       return;
     }
   } catch (e) {}
-  var VERSIONE = "1.9.0-demo";
+  var VERSIONE = "1.10.1-demo";
   var ASS = { nome: "Alberto Malic · Tavolo", tel: "349 699 1941", email: "malicalberto604@gmail.com" };
   var KEY = "tavolo-demo-v2", DURATA = 3 * 864e5;
 
@@ -822,6 +822,7 @@ const AZIONI = {
     out.msg = n ? `Copiati ${n} turni` : "I turni c'erano già";
   }],
   "pres.timbra": ["tutti", (S, p, u, out) => {
+    if (u.tecnico) no("L'assistenza non segna entrate e uscite");
     const aperta = S.presenze.find(x => x.sid === u.id && !x.out);
     if (aperta) { aperta.out = Date.now(); const m = Math.round((aperta.out - aperta.in) / 60000); out.msg = `Uscita alle ${hhmm(aperta.out)} · ${Math.floor(m / 60)} h ${m % 60} min`; }
     else { S.presenze.push({ id: uid(), sid: u.id, in: Date.now(), out: null }); out.msg = `Entrata alle ${hhmm(Date.now())}`; }
@@ -851,7 +852,7 @@ const AZIONI = {
     const c = num(p.coperto, 0, 50), iv = num(p.iva, 0, 30); if (c != null) s.coperto = round2(c); if (iv != null) s.iva = iv;
     log(S, u, "Impostazioni del locale aggiornate");
   }],
-  "imp.indirizzo": ["admin", (S, p) => {
+  "imp.indirizzo": ["tecnico", (S, p) => {
     const ip = txt(p.ip, 15).replace(/^https?:\/\//, "").replace(/:\d+.*$/, "");
     if (ip && !/^(10|172|192)\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(ip)) no("Scrivi l'indirizzo del computer nel Wi-Fi, es. 192.168.1.20");
     S.settings.indirizzoLan = ip;
@@ -872,7 +873,7 @@ const AZIONI = {
     S.settings.traduzione = p.servizio; log(S, u, "Traduzione automatica: " + p.servizio);
   }],
   "imp.aspetto": ["admin", (S, p) => { if (/^#[0-9a-fA-F]{6}$/.test(p.accent || "")) S.settings.accent = p.accent; if (["auto", "chiaro", "scuro"].includes(p.tema)) S.settings.tema = p.tema; }],
-  "imp.modulo": ["admin", (S, p, u, out, ctx) => {
+  "imp.modulo": ["tecnico", (S, p, u, out, ctx) => {
     const k = p.k; if (!["prenotazioni", "magazzino", "cucina", "consegne", "ai", "qr", "clienti", "turni", "attesa", "haccp"].includes(k)) no("Modulo non valido");
     if (!S.settings.moduli[k] && ctx.piano === "bar" && (k === "cucina" || k === "magazzino")) no("Questo modulo è incluso dal piano Ristorante: contatta l'assistenza");
     S.settings.moduli[k] = !S.settings.moduli[k]; log(S, u, `Modulo ${k} ${S.settings.moduli[k] ? "attivato" : "spento"}`);
@@ -928,22 +929,22 @@ const AZIONI = {
     S.settings.prenOnline = { whatsapp: w, orari: orari || "12:30-14:30,19:30-23:00", chiuso, max: Math.round(num(p.max, 1, 50) || 10), pagina: /^https?:\/\/\S+$/.test(p.pagina || "") ? p.pagina : "" };
     log(S, u, "Prenotazioni online aggiornate");
   }],
-  "imp.rt": ["admin", (S, p, u) => {
+  "imp.rt": ["tecnico", (S, p, u) => {
     const modo = ["spento", "prova", "epson"].includes(p.modo) ? p.modo : no("Modalità non valida"), ip = txt(p.ip, 60);
     if (modo === "epson" && !/^[\w.\-]+(:\d{1,5})?$/.test(ip)) no("Scrivi l'indirizzo IP del registratore, es. 192.168.1.60");
     const reparto = Math.round(num(p.reparto, 1, 99) || 1);
     S.settings.rt = { modo, ip, reparto, auto: !!p.auto, piattaforma: !!p.piattaforma };
     log(S, u, `Registratore: ${{ spento: "spento", prova: "prova senza registratore", epson: "Epson " + ip }[modo]}`);
   }],
-  "cat.rt": ["admin", (S, p) => { const c = S.categorie[p.i] || no("Categoria non trovata"); const r = p.rep === "" || p.rep == null ? null : Math.round(num(p.rep, 1, 99) || 0); if (r === 0) no("Reparto del registratore tra 1 e 99"); c.rt = r; }],
+  "cat.rt": ["tecnico", (S, p) => { const c = S.categorie[p.i] || no("Categoria non trovata"); const r = p.rep === "" || p.rep == null ? null : Math.round(num(p.rep, 1, 99) || 0); if (r === 0) no("Reparto del registratore tra 1 e 99"); c.rt = r; }],
   "pren.online": ["pren", (S, p, u) => {
     const nome = txt(p.nome, 50), pers = num(p.persone, 1, 200);
     if (!nome || !/^\d{4}-\d{2}-\d{2}$/.test(p.data) || !/^\d{2}:\d{2}$/.test(p.ora) || !pers) no("Dal messaggio mancano nome, giorno, ora o persone");
     S.prenotazioni.push({ id: uid(), data: p.data, ora: p.ora, nome, tel: txt(p.tel, 30), persone: Math.round(pers), tavolo: "", note: txt(p.note, 160), stato: "attesa", da: u.nome, fonte: "online", acc: !!p.acc });
     log(S, u, `Prenotazione online ${nome}, ${pers} pers. ${p.data} ${p.ora}`);
   }],
-  "imp.aggAuto": ["admin", (S, p, u) => { S.settings.aggAuto = S.settings.aggAuto === false; log(S, u, `Aggiornamenti automatici ${S.settings.aggAuto ? "attivati" : "spenti"}`); }],
-  "imp.preset": ["admin", (S, p, u) => {
+  "imp.aggAuto": ["tecnico", (S, p, u) => { S.settings.aggAuto = S.settings.aggAuto === false; log(S, u, `Aggiornamenti automatici ${S.settings.aggAuto ? "attivati" : "spenti"}`); }],
+  "imp.preset": ["tecnico", (S, p, u) => {
     if (S.tavoli.some(t => t.righe.length)) no("Chiudi prima i tavoli aperti");
     const k = ["bar", "pizzeria", "trattoria"].includes(p.modello) ? p.modello : no("Modello non valido");
     const pm = presetMenu(k); pm.menu.forEach(m => m.ing = m.ing.filter(([id]) => ING(S, id)));
@@ -1110,7 +1111,7 @@ const AZIONI = {
       escluse: (Array.isArray(d.escluse) ? d.escluse : []).filter(c => cats.has(c)).slice(0, 100), nascosti: (Array.isArray(d.nascosti) ? d.nascosti : []).filter(id => ids.has(id)).slice(0, 1000)
     };
   }],
-  "imp.stampanti": ["admin", (S, p, u) => {
+  "imp.stampanti": ["tecnico", (S, p, u) => {
     const st = {}; ["Cucina", "Pizzeria", "Bar", "Sala"].forEach(k => { const v = txt((p.stampanti || {})[k], 60); if (v && !/^[\w.\-]+(:\d{1,5})?$/.test(v)) no(`Indirizzo della stampante ${k} non valido (es. 192.168.1.50 o 192.168.1.50:9100)`); st[k] = v; });
     S.settings.stampanti = st; S.settings.stampaAuto = !!p.auto; const c = parseInt(p.colonne, 10); if ([32, 42, 48].includes(c)) S.settings.colonne = c;
     log(S, u, "Stampanti aggiornate");
@@ -1122,7 +1123,8 @@ function applica(S, a, u, ctx) {
   const out = { stampe: [], msg: null };
   const def = AZIONI[a && a.type];
   if (!def) return { errore: "Azione sconosciuta" };
-  if (!ACCESSO[def[0]].includes(u.ruolo)) return { errore: "Il tuo ruolo non può farlo" };
+  if (def[0] === "tecnico") { if (!u.tecnico && !ctx.tecnicoLibero) return { errore: "Questa impostazione la cambia l'assistenza Tavolo: contatta Alberto" }; }
+  else if (!ACCESSO[def[0]].includes(u.ruolo)) return { errore: "Il tuo ruolo non può farlo" };
   if (ctx.bloccata && BLOCCATE_SE_SCADUTA.includes(a.type)) return { errore: ctx.sospesa ? "Servizio sospeso: contatta l'assistenza" : "Licenza scaduta: contatta l'assistenza per rinnovarla" };
   normalizza(S);
   try { def[1](S, a.payload || {}, u, out, ctx); } catch (e) { if (e instanceof Errore) return { errore: e.message }; throw e; }
@@ -1140,7 +1142,7 @@ function posGriglia(ts) {
 function statoPubblico(S) {
   const c = Object.assign({}, S);
   c.staff = S.staff.map(({ id, nome, ruolo }) => ({ id, nome, ruolo }));
-  delete c.licenza; delete c.sblocco; delete c.trChiave; delete c.aiChiave;
+  delete c.licenza; delete c.sblocco; delete c.trChiave; delete c.aiChiave; delete c.tecnico; delete c.sbloccoTec;
   return c;
 }
 
@@ -1280,7 +1282,7 @@ module.exports = { haccpMancanti, formazioneInScadenza, TIPI_ATTR, FREQ, AZIONI_
     if (p === "/api/azione") {
       var bozza = structuredClone(S);
       var r2;
-      try { r2 = L.applica(bozza, corpo, u, { bloccata: false, sospesa: false, piano: "pro" }); } catch (e) { return json(400, { errore: e.message }); }
+      try { r2 = L.applica(bozza, corpo, u, { bloccata: false, sospesa: false, piano: "pro", tecnicoLibero: true }); } catch (e) { return json(400, { errore: e.message }); }
       if (r2.errore) return json(400, { errore: r2.errore });
       D.S = bozza;
       if (r2.archivio) { var mese = L.giorno(Date.now()).slice(0, 7); if (D.mesi.indexOf(mese) < 0) D.mesi.unshift(mese); }
