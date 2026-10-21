@@ -282,10 +282,10 @@ tr:last-child td{border-bottom:0}
 "use strict";
 /* ---------- Costanti ---------- */
 const ACCENTS=["#2F6B4F","#8A3B2E","#2D4E86","#7A4E8C","#1F7A7A","#9A6A12","#3B3B3B"];
-const TABS={sala:"Sala",prenotazioni:"Prenotazioni",cucina:"Cucina e bar",menu:"Menu",magazzino:"Magazzino",haccp:"HACCP",cassa:"Cassa",clienti:"Clienti",staff:"Staff",report:"Report",impostazioni:"Impostazioni"};
+const TABS={sala:"Sala",prenotazioni:"Prenotazioni",eventi:"Eventi",cucina:"Cucina e bar",menu:"Menu",magazzino:"Magazzino",haccp:"HACCP",cassa:"Cassa",clienti:"Clienti",staff:"Staff",report:"Report",impostazioni:"Impostazioni"};
 const ROLES={titolare:"Titolare",cassa:"Cassa",cameriere:"Cameriere",cucina:"Cucina"};
-const ROLE_TABS={titolare:Object.keys(TABS),cassa:["sala","prenotazioni","cucina","haccp","cassa","clienti"],cameriere:["sala","prenotazioni","cucina","haccp"],cucina:["cucina","haccp"]};
-const MODULE_TAB={prenotazioni:"prenotazioni",magazzino:"magazzino",cucina:"cucina",clienti:"clienti",turni:"staff",haccp:"haccp"};
+const ROLE_TABS={titolare:Object.keys(TABS),cassa:["sala","prenotazioni","eventi","cucina","haccp","cassa","clienti"],cameriere:["sala","prenotazioni","cucina","haccp"],cucina:["cucina","haccp"]};
+const MODULE_TAB={prenotazioni:"prenotazioni",eventi:"eventi",magazzino:"magazzino",cucina:"cucina",clienti:"clienti",turni:"staff",haccp:"haccp"};
 const REPARTI=["Cucina","Pizzeria","Bar"];
 const LINGUE={it:"Italiano",en:"English",fr:"Français",de:"Deutsch",es:"Español"};
 const LINGUE_IT={en:"Inglese",fr:"Francese",de:"Tedesco",es:"Spagnolo"};
@@ -913,6 +913,55 @@ function htmlManualeHaccp(){const d=datiImpresa(),h=H(),c=h.conf,s=S.settings,og
   <div class="foot">${rev}. Documento predisposto con Tavolo il ${oggi} sulla base dei dati inseriti dal locale. Va letto, adattato alla realtà del locale e firmato dal titolare, che ne è responsabile.</div>
   <script>setTimeout(()=>print(),500)<\/script></body></html>`}
 
+/* ---------- Eventi privati e preventivi (1.11) ---------- */
+const EV_TIPI=["Compleanno","Comunione","Cresima","Battesimo","Matrimonio","Laurea","Cena aziendale","Anniversario","Festa privata","Altro"];
+const EV_STATI={bozza:["mut","Bozza"],inviato:["warn","Preventivo inviato"],confermato:["ok","Confermato"],svolto:["info","Svolto"],annullato:["mut","Annullato"]};
+const EV_MET={contanti:"Contanti",carta:"Carta / POS",bonifico:"Bonifico",satispay:"App di pagamento"};
+const EV_COND=["Il preventivo è valido per i giorni indicati: dopo va riconfermato.","La prenotazione è confermata con il versamento della caparra.","Il numero definitivo degli invitati va comunicato almeno 3 giorni prima: si paga per il numero comunicato.","In caso di disdetta meno di 7 giorni prima, la caparra resta al locale.","Allergie e intolleranze vanno comunicate in anticipo."];
+const EVn=id=>(S.eventi||[]).find(e=>e.id===id);
+const evTotale=e=>round2((e.persone||0)*(e.prezzo||0)+(e.bambini||0)*(e.prezzoBimbi||0)+(e.extra||[]).reduce((s,x)=>s+(x.prezzo||0),0));
+const evData=k=>new Date(k+"T12:00").toLocaleDateString("it-IT",{weekday:"long",day:"numeric",month:"long",year:"numeric"});
+const evChip=e=>{const[c,l]=EV_STATI[e.stato]||["mut",e.stato];return`<span class="chip ${c}">${l}</span>`};
+const evCapChip=e=>{const c=e.caparra||{};if(c.pagata)return`<span class="chip ok">Caparra ${eur(c.pagata)}</span>`;if(c.richiesta&&!["svolto","annullato"].includes(e.stato))return`<span class="chip warn">Caparra da ricevere ${eur(c.richiesta)}</span>`;return""};
+const evNumTxt=e=>`${e.num}/${new Date(e.creato||Date.now()).getFullYear()}`;
+function evTestoWa(e){const s=S.settings,tot=evTotale(e),c=e.caparra||{},r=[];
+  r.push(`Ciao ${e.nome.split(" ")[0]}, ecco il preventivo di ${s.nome} per ${e.titolo||e.tipo.toLowerCase()}.`,"",`📅 ${evData(e.data)}, ore ${e.ora}${e.oraFine?"–"+e.oraFine:""}`,`👥 ${e.persone} adulti${e.bambini?` e ${e.bambini} bambini`:""}${e.sala?` · ${e.sala}`:""}`);
+  if((e.menu||[]).length)r.push("","*Menu*",...e.menu.map(x=>"• "+x));
+  r.push("",`${e.persone} adulti × ${eur(e.prezzo)} = ${eur(e.persone*e.prezzo)}`);
+  if(e.bambini)r.push(`${e.bambini} bambini × ${eur(e.prezzoBimbi)} = ${eur(e.bambini*e.prezzoBimbi)}`);
+  (e.extra||[]).forEach(x=>r.push(`${x.desc}: ${eur(x.prezzo)}`));
+  r.push(`*Totale: ${eur(tot)}*`);
+  if(c.pagata)r.push(`Caparra ricevuta: ${eur(c.pagata)} · resta da pagare ${eur(Math.max(0,tot-c.pagata))}`);else if(c.richiesta)r.push(`Per confermare serve una caparra di ${eur(c.richiesta)}.`);
+  r.push("",`Il preventivo vale ${e.valido||15} giorni. Rispondi a questo messaggio per confermare o per cambiare qualcosa.`,"",s.nome);
+  return r.join("\n")}
+function htmlPreventivo(e){const s=S.settings,f=FS()||{},acc=s.accent||"#2F6B4F",tot=evTotale(e),c=e.caparra||{},cr=new Date(e.creato||Date.now()),scad=new Date(cr.getTime()+(e.valido||15)*864e5);
+  const dIt=d=>d.toLocaleDateString("it-IT"),forf=f.regime==="RF19";
+  const righe=[[`Adulti`,e.persone,e.prezzo],...(e.bambini?[[`Bambini`,e.bambini,e.prezzoBimbi]]:[]),...(e.extra||[]).map(x=>[x.desc,1,x.prezzo])];
+  return`<!doctype html><html lang="it"><head><meta charset="utf-8"><title>Preventivo ${esc(evNumTxt(e))} · ${esc(e.nome)}</title><style>
+  @page{size:A4;margin:15mm 15mm 16mm}*{box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact}body{font-family:-apple-system,"Segoe UI",Roboto,Arial,sans-serif;color:#1d2b24;font-size:10pt;margin:0;line-height:1.4}
+  .top{display:flex;justify-content:space-between;gap:10mm;border-bottom:2.5px solid ${acc};padding-bottom:4mm}.top h1{font-size:17pt;margin:0 0 1mm;color:${acc}}.small{font-size:8.5pt;color:#5a6660}
+  .doc{text-align:right}.doc b{font-size:15pt;display:block;color:${acc}}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:5mm;margin:6mm 0 4mm}.box{border:1px solid #d8d2c6;border-radius:3mm;padding:3.5mm}.l{font-size:7.8pt;text-transform:uppercase;letter-spacing:.07em;color:#6b766f;margin-bottom:1mm}
+  h2{font-size:11pt;color:${acc};margin:5mm 0 2mm}ul{margin:0;padding-left:5mm}li{margin:.8mm 0}
+  table{width:100%;border-collapse:collapse}th{background:${acc};color:#fff;text-align:left;font-weight:600;padding:2mm;font-size:9pt}td{padding:2mm;border-bottom:1px solid #e6e1d7}.r{text-align:right;white-space:nowrap}
+  .tot{margin-left:auto;width:90mm;margin-top:3mm}.tot div{display:flex;justify-content:space-between;padding:1mm 0}.tot .g{font-size:13pt;font-weight:700;border-top:2px solid ${acc};padding-top:2mm;margin-top:1mm}
+  .cond{font-size:8.6pt;color:#3c4842}.cond li{margin:.6mm 0}.firme{display:grid;grid-template-columns:1fr 1fr;gap:12mm;margin-top:10mm}.firme div{border-top:1px solid #1d2b24;padding-top:1.5mm;font-size:8.5pt;color:#5a6660}
+  .foot{margin-top:7mm;font-size:8pt;color:#6b766f;border-top:1px solid #ddd;padding-top:2mm}</style></head><body>
+  <div class="top"><div><h1>${esc(f.den||s.nome)}</h1>${f.ind?`<div>${esc(f.ind)} ${esc(f.civ||"")} · ${esc(f.cap||"")} ${esc(f.com||"")}${f.prov?" ("+esc(f.prov)+")":""}</div>`:`<div>${esc([s.tipo,s.citta].filter(Boolean).join(" · "))}</div>`}${f.piva?`<div class="small">P.IVA ${esc(f.piva)}</div>`:""}${s.telLocale?`<div class="small">Tel. ${esc(s.telLocale)}</div>`:""}</div>
+  <div class="doc"><span class="small">Preventivo per evento</span><b>N. ${esc(evNumTxt(e))}</b><div>del ${dIt(cr)}</div><div class="small">valido fino al ${dIt(scad)}</div></div></div>
+  <div class="grid"><div class="box"><div class="l">Cliente</div><b>${esc(e.nome)}</b>${e.tel?`<div>Tel. ${esc(e.tel)}</div>`:""}${e.email?`<div>${esc(e.email)}</div>`:""}</div>
+  <div class="box"><div class="l">Evento</div><b>${esc(e.titolo||e.tipo)}</b><div>${esc(evData(e.data))}, ore ${esc(e.ora)}${e.oraFine?"–"+esc(e.oraFine):""}</div><div>${e.persone} adulti${e.bambini?` e ${e.bambini} bambini`:""}${e.sala?" · "+esc(e.sala):""}</div></div></div>
+  ${(e.menu||[]).length?`<h2>Menu</h2><ul>${e.menu.map(x=>`<li>${esc(x)}</li>`).join("")}</ul>`:""}
+  <h2>Costi</h2><table><thead><tr><th>Descrizione</th><th class="r">Quantità</th><th class="r">Prezzo</th><th class="r">Importo</th></tr></thead><tbody>${righe.map(([d,q,p])=>`<tr><td>${esc(d)}</td><td class="r">${q}</td><td class="r">${eur(p)}</td><td class="r">${eur(q*p)}</td></tr>`).join("")}</tbody></table>
+  <div class="tot"><div class="g"><span>Totale</span><span>${eur(tot)}</span></div>${c.richiesta||c.pagata?`<div><span>Caparra ${c.pagata?"ricevuta"+(c.quando?" il "+dIt(new Date(c.quando)):""):"per confermare"}</span><span>${eur(c.pagata||c.richiesta)}</span></div><div><span>Saldo il giorno dell'evento</span><span>${eur(Math.max(0,tot-(c.pagata||c.richiesta)))}</span></div>`:""}</div>
+  ${e.note?`<h2>Note</h2><div>${esc(e.note)}</div>`:""}
+  ${e.condizioni?`<h2>Condizioni</h2><ul class="cond">${e.condizioni.split("\n").filter(Boolean).map(x=>`<li>${esc(x)}</li>`).join("")}</ul>`:""}
+  <div class="firme"><div>Per ${esc(f.den||s.nome)}</div><div>Per accettazione · il cliente, data e firma</div></div>
+  <div class="foot">${forf?"Prezzi finali: operazione in regime forfettario, senza applicazione dell'IVA.":"Prezzi IVA inclusa."} Il documento fiscale viene emesso al pagamento.</div>
+  <script>setTimeout(()=>print(),400)<\/script></body></html>`}
+function evTotLive(){const n=id=>{const v=parseFloat(String(val(id)||"").replace(",","."));return isNaN(v)?0:v};
+  let t=n("ev-pers")*n("ev-prezzo")+n("ev-bimbi")*n("ev-prezzob");for(let i=0;i<4;i++)if((val("evx-d-"+i)||"").trim())t+=n("evx-p-"+i);
+  const el=$("ev-tot");if(el)el.textContent=eur(round2(t));const cp=$("ev-cap");if(cp&&!cp.dataset.toccato)cp.placeholder=eur(Math.round(t*.3))}
 const VIEWS={
 haccp(){return vistaHaccp()},
 sala(){
@@ -954,6 +1003,16 @@ prenotazioni(){
   <label class="row small" style="gap:6px;margin-top:8px"><input type="checkbox" id="pAcc"> ♿ Serve un tavolo accessibile (sedia a rotelle)</label>
   <div class="row" style="margin-top:12px"><button class="btn primary" data-act="presAdd">Salva prenotazione</button></div></div></div>`;
 },
+eventi(){
+  const oggi=dkey(now()),f=UI.evFiltro||"prossimi",E=S.eventi||[];
+  const filtri={prossimi:["In arrivo",e=>e.data>=oggi&&!["svolto","annullato"].includes(e.stato)],daconf:["Da confermare",e=>["bozza","inviato"].includes(e.stato)&&e.data>=oggi],passati:["Passati e annullati",e=>e.data<oggi||["svolto","annullato"].includes(e.stato)]};
+  const lista=E.filter(filtri[f][1]).sort((a,b)=>f==="passati"?(b.data+b.ora).localeCompare(a.data+a.ora):(a.data+a.ora).localeCompare(b.data+b.ora));
+  const mese=dkey(now()+30*864e5),pros=E.filter(e=>e.stato==="confermato"&&e.data>=oggi&&e.data<=mese);
+  const capIn=E.filter(e=>e.stato!=="annullato"&&e.data>=oggi).reduce((s,e)=>s+((e.caparra||{}).pagata||0),0);
+  return`<div class="spread"><h2>Eventi</h2><button class="btn primary" data-act="evNuovo">Nuovo preventivo</button></div><p class="lead">Compleanni, comunioni, cene aziendali: prepari il preventivo, lo mandi su WhatsApp o lo stampi, registri la caparra. Quando l'evento è confermato finisce da solo nelle Prenotazioni del giorno.</p>
+  <div class="row" style="margin-bottom:12px"><span class="chip ok">${pros.length} confermati nei prossimi 30 giorni</span><span class="chip info">${pros.reduce((s,e)=>s+e.persone+(e.bambini||0),0)} invitati</span><span class="chip mut">Caparre ricevute ${eur(capIn)}</span></div>
+  <div class="pills" style="margin-bottom:14px">${Object.entries(filtri).map(([k,[l,fn]])=>`<button data-act="evFiltro" data-v="${k}" aria-pressed="${k===f}">${l} · ${E.filter(fn).length}</button>`).join("")}</div>
+  ${lista.length?`<div class="panel"><div class="tablewrap"><table><thead><tr><th>Quando</th><th>Evento</th><th class="r">Invitati</th><th class="r">Totale</th><th>Stato</th><th></th></tr></thead><tbody>${lista.map(e=>`<tr><td><b>${esc(dayName(e.data))}</b><div class="small muted">ore ${esc(e.ora)}</div></td><td><b>${esc(e.titolo||e.tipo)}</b><div class="small muted">${esc(e.nome)}${e.sala?" · "+esc(e.sala):""} · n. ${esc(evNumTxt(e))}</div></td><td class="r num">${e.persone+(e.bambini||0)}</td><td class="r num">${eur(evTotale(e))}</td><td>${evChip(e)} ${evCapChip(e)}</td><td class="r"><button class="btn sm" data-act="evApri" data-id="${e.id}">Apri</button></td></tr>`).join("")}</tbody></table></div></div>`:`<p class="empty">${f==="prossimi"?"Nessun evento in arrivo. Tocca Nuovo preventivo quando un cliente chiede un compleanno, una comunione o una cena di gruppo.":f==="daconf"?"Nessun preventivo in attesa di risposta.":"Nessun evento passato o annullato."}</p>`}`},
 cucina(){
   const reps=["Tutti",...REPARTI];
   const list=S.comande.filter(c=>UI.cucinaRep==="Tutti"||c.reparto===UI.cucinaRep).sort((a,b)=>a.stato===b.stato?a.ora-b.ora:a.stato==="prep"?-1:1);
@@ -1080,7 +1139,7 @@ impostazioni(){
   <div class="row"><button class="btn primary" data-act="saveSet">Salva</button></div></div></div>
   <div class="panel"><h3 style="margin-bottom:10px">Aspetto</h3><div class="label" style="margin-bottom:6px">Colore del marchio</div><div class="swatches">${ACCENTS.map(c=>`<button style="--c:${c}" data-act="accent" data-v="${c}" aria-pressed="${c===s.accent}" aria-label="Colore ${c}"></button>`).join("")}</div>
   <div class="label" style="margin:14px 0 6px">Tema</div><div class="seg">${[["auto","Automatico"],["chiaro","Chiaro"],["scuro","Scuro"]].map(([k,l])=>`<button data-act="tema" data-v="${k}" aria-pressed="${s.tema===k}">${l}</button>`).join("")}</div>
-  <h3 style="margin:18px 0 6px">Moduli attivi</h3>${TEC()?"":`<p class="small muted" style="margin:0 0 6px">Li accende e spegne l'assistenza Tavolo, secondo il piano scelto.</p>`}<div>${[["prenotazioni","Prenotazioni","Agenda dei tavoli prenotati"],["cucina","Cucina e bar","Comande ai reparti e stampanti"],["magazzino","Magazzino","Scarico scorte, food cost, riordino"],["consegne","Consegne","Ordini da Glovo, Deliveroo, Just Eat e al telefono"],["ai","Assistente AI","Un aiuto: risponde su come si usa Tavolo e sui numeri del locale. Serve internet e una chiave"],["qr","Ordini dal tavolo (QR)","Il cliente ordina dal suo telefono, il cameriere conferma"],["clienti","Clienti abituali","Visite, piatti preferiti, compleanni e punti fedeltà"],["turni","Turni e presenze","Turni della settimana, entrata e uscita dello staff"],["attesa","Lista d'attesa","Chi aspetta un tavolo, avvisato su WhatsApp o SMS"],["haccp","HACCP","Temperature dei frigo, merci, pulizie, registri e manuale da stampare"]].map(([k,l,d])=>{const lim=L.piano==="bar"&&["cucina","magazzino","consegne"].includes(k);return`<div class="switch"><div><b>${l}</b><div class="small muted">${d}${lim?" · non incluso nel piano Bar":""}</div></div><button class="toggle" data-act="modulo" data-v="${k}" aria-pressed="${!!s.moduli[k]}" aria-label="${l}" ${(lim&&!s.moduli[k])||!TEC()?"disabled":""}></button></div>`}).join("")}</div></div>
+  <h3 style="margin:18px 0 6px">Moduli attivi</h3>${TEC()?"":`<p class="small muted" style="margin:0 0 6px">Li accende e spegne l'assistenza Tavolo, secondo il piano scelto.</p>`}<div>${[["prenotazioni","Prenotazioni","Agenda dei tavoli prenotati"],["cucina","Cucina e bar","Comande ai reparti e stampanti"],["magazzino","Magazzino","Scarico scorte, food cost, riordino"],["consegne","Consegne","Ordini da Glovo, Deliveroo, Just Eat e al telefono"],["ai","Assistente AI","Un aiuto: risponde su come si usa Tavolo e sui numeri del locale. Serve internet e una chiave"],["qr","Ordini dal tavolo (QR)","Il cliente ordina dal suo telefono, il cameriere conferma"],["clienti","Clienti abituali","Visite, piatti preferiti, compleanni e punti fedeltà"],["turni","Turni e presenze","Turni della settimana, entrata e uscita dello staff"],["attesa","Lista d'attesa","Chi aspetta un tavolo, avvisato su WhatsApp o SMS"],["haccp","HACCP","Temperature dei frigo, merci, pulizie, registri e manuale da stampare"],["eventi","Eventi e preventivi","Compleanni, comunioni, cene aziendali: preventivo, caparra e calendario"]].map(([k,l,d])=>{const lim=L.piano==="bar"&&["cucina","magazzino","consegne"].includes(k);return`<div class="switch"><div><b>${l}</b><div class="small muted">${d}${lim?" · non incluso nel piano Bar":""}</div></div><button class="toggle" data-act="modulo" data-v="${k}" aria-pressed="${!!s.moduli[k]}" aria-label="${l}" ${(lim&&!s.moduli[k])||!TEC()?"disabled":""}></button></div>`}).join("")}</div></div>
   <div class="panel"><h3 style="margin-bottom:4px">Sale e tavoli</h3><div class="small muted">Per ogni tavolo: nome e posti. Con 0 posti il coperto non si applica (banco, asporto). Spunta ♿ sui tavoli comodi per una sedia a rotelle.</div>${s.sale.map(salaBox).join("")}
   <div class="row" style="margin-top:12px"><input type="text" id="newSala" placeholder="Nuova sala, es. Terrazza" style="flex:1 1 160px"><button class="btn" data-act="addSala">Aggiungi sala</button></div></div>
   <div class="panel"><h3 style="margin-bottom:4px">Staff e PIN</h3><div class="small muted">Ognuno entra con il suo PIN di 4 cifre e vede solo le schede del suo ruolo. Per cambiare un PIN scrivi quello nuovo nella casella.</div>
@@ -1246,6 +1305,40 @@ function orderPanel(t){
 
 /* ---------- Modali ---------- */
 const MODALS={
+evEdit(m){const e=m.id?EVn(m.id):null;if(m.id&&!e)return null;const d=e||{tipo:"Compleanno",data:dkey(now()+14*864e5),ora:"20:30",persone:20,bambini:0,prezzo:"",prezzoBimbi:"",menu:[],extra:[],condizioni:EV_COND.join("\n"),valido:15,sala:""};
+  const sale=[...new Set(["Locale intero",...(S.settings.sale||[]).filter(x=>x!=="Banco e asporto")])];
+  const piatti=S.categorie.map(c=>`<optgroup label="${esc(c.nome)}">${S.menu.filter(x=>x.cat===c.nome).map(x=>`<option value="${esc(x.nome)}">${esc(x.nome)}</option>`).join("")}</optgroup>`).join("");
+  const ex=[...(d.extra||[]),{},{},{},{}].slice(0,4);
+  return mhead(e?`Modifica evento n. ${esc(evNumTxt(e))}`:"Nuovo preventivo per un evento","Tutto si può cambiare anche dopo")+`<div oninput="evTotLive()">
+  <div class="fgrid"><label>Cliente<input type="text" id="ev-nome" value="${esc(d.nome||"")}" placeholder="Nome e cognome o azienda" autofocus></label><label>Telefono<input type="tel" id="ev-tel" value="${esc(d.tel||"")}" placeholder="333 ..."></label>
+  <label>Tipo di evento<select id="ev-tipo">${EV_TIPI.map(t=>`<option ${t===d.tipo?"selected":""}>${t}</option>`).join("")}</select></label><label>Titolo (facoltativo)<input type="text" id="ev-titolo" value="${esc(d.titolo||"")}" placeholder="es. 18 anni di Sara"></label>
+  <label>Giorno<input type="date" id="ev-data" value="${esc(d.data)}"></label><label>Dalle<input type="time" id="ev-ora" value="${esc(d.ora)}"></label><label>Alle (facoltativo)<input type="time" id="ev-orafine" value="${esc(d.oraFine||"")}"></label>
+  <label>Sala<select id="ev-sala">${sale.map(x=>`<option ${x===d.sala?"selected":""}>${esc(x)}</option>`).join("")}</select></label>
+  <label>Adulti<input type="number" id="ev-pers" min="1" value="${d.persone}"></label><label>Prezzo a persona €<input type="text" inputmode="decimal" id="ev-prezzo" value="${d.prezzo===""?"":esc(String(d.prezzo).replace(".",","))}" placeholder="es. 35"></label>
+  <label>Bambini<input type="number" id="ev-bimbi" min="0" value="${d.bambini||0}"></label><label>Prezzo bambino €<input type="text" inputmode="decimal" id="ev-prezzob" value="${d.prezzoBimbi?esc(String(d.prezzoBimbi).replace(".",",")):""}" placeholder="es. 18"></label></div>
+  <label style="display:grid;gap:4px;font-size:13.5px;font-weight:500;margin-top:12px">Menu dell'evento, una portata per riga<textarea id="ev-menu" rows="5" style="font:inherit" placeholder="Antipasto: arancinette e caponata&#10;Primo: pasta alla Norma&#10;Torta e spumante">${esc((d.menu||[]).join("\n"))}</textarea></label>
+  <div class="row" style="margin-top:6px"><select id="ev-add" data-srv="1" aria-label="Piatto del menu"><option value="">Aggiungi un piatto del menu…</option>${piatti}</select><button class="btn sm" data-act="evAddPiatto">Aggiungi</button></div>
+  <h3 style="margin:14px 0 6px">Extra (torta, allestimento, musica…)</h3><div style="display:grid;gap:6px">${ex.map((x,i)=>`<div class="row" style="flex-wrap:nowrap"><input type="text" id="evx-d-${i}" value="${esc(x.desc||"")}" placeholder="Descrizione" style="flex:1"><input type="text" inputmode="decimal" id="evx-p-${i}" value="${x.prezzo!=null?esc(String(x.prezzo).replace(".",",")):""}" placeholder="€" style="width:90px" aria-label="Prezzo"></div>`).join("")}</div>
+  <div class="fgrid" style="margin-top:12px"><label>Caparra per confermare €<input type="text" inputmode="decimal" id="ev-cap" value="${e?esc(String((e.caparra||{}).richiesta||0).replace(".",",")):""}" placeholder="30% del totale" oninput="this.dataset.toccato=1"></label><label>Preventivo valido (giorni)<input type="number" id="ev-valido" min="1" max="90" value="${d.valido||15}"></label><label>Email (facoltativa)<input type="email" id="ev-email" value="${esc(d.email||"")}"></label></div>
+  <label style="display:grid;gap:4px;font-size:13.5px;font-weight:500;margin-top:10px">Note (allergie, richieste)<input type="text" id="ev-note" value="${esc(d.note||"")}"></label>
+  <details style="margin-top:10px"><summary class="small">Condizioni stampate sul preventivo</summary><textarea id="ev-cond" rows="5" style="width:100%;margin-top:6px;font:inherit">${esc(d.condizioni||"")}</textarea></details>
+  <div class="spread" style="margin-top:14px"><div>Totale <b id="ev-tot" style="font-size:20px">${eur(e?evTotale(e):0)}</b></div><div class="row"><button class="btn" data-act="close">Annulla</button><button class="btn primary" data-act="evSalva" data-id="${e?e.id:""}">Salva preventivo</button></div></div></div>`},
+evView(m){const e=EVn(m.id);if(!e)return null;const tot=evTotale(e),c=e.caparra||{},chiuso=["svolto","annullato"].includes(e.stato);
+  const wa=e.tel?`https://wa.me/${waNum(e.tel)}?text=${encodeURIComponent(evTestoWa(e))}`:"";
+  return mhead(`${esc(e.titolo||e.tipo)} · ${esc(e.nome)}`,`Preventivo n. ${esc(evNumTxt(e))} · ${esc(evData(e.data))}, ore ${esc(e.ora)}${e.oraFine?"–"+esc(e.oraFine):""}`)+`
+  <div class="row" style="margin-bottom:10px">${evChip(e)} ${evCapChip(e)}${e.sala?`<span class="chip mut">${esc(e.sala)}</span>`:""}<span class="chip info">${e.persone} adulti${e.bambini?` + ${e.bambini} bambini`:""}</span></div>
+  <div class="grid2"><div><h3 style="margin-bottom:6px">Menu</h3>${(e.menu||[]).length?`<ul style="margin:0;padding-left:18px">${e.menu.map(x=>`<li>${esc(x)}</li>`).join("")}</ul>`:`<p class="small muted">Nessuna portata scritta.</p>`}${e.note?`<p class="small" style="color:var(--warn);margin-top:8px">${esc(e.note)}</p>`:""}<p class="small muted" style="margin-top:8px">${e.tel?"Tel. "+esc(e.tel):""}${e.email?" · "+esc(e.email):""}</p></div>
+  <div><h3 style="margin-bottom:6px">Costi</h3><table><tbody><tr><td>${e.persone} adulti × ${eur(e.prezzo)}</td><td class="r num">${eur(e.persone*e.prezzo)}</td></tr>${e.bambini?`<tr><td>${e.bambini} bambini × ${eur(e.prezzoBimbi)}</td><td class="r num">${eur(e.bambini*e.prezzoBimbi)}</td></tr>`:""}${(e.extra||[]).map(x=>`<tr><td>${esc(x.desc)}</td><td class="r num">${eur(x.prezzo)}</td></tr>`).join("")}<tr><td><b>Totale</b></td><td class="r num"><b>${eur(tot)}</b></td></tr><tr><td>Caparra ${c.pagata?`ricevuta (${EV_MET[c.metodo]||c.metodo})`:"richiesta"}</td><td class="r num">${eur(c.pagata||c.richiesta||0)}</td></tr>${c.pagata?`<tr><td>Resta da pagare</td><td class="r num">${eur(Math.max(0,tot-c.pagata))}</td></tr>`:""}</tbody></table></div></div>
+  <div class="row" style="margin-top:14px"><button class="btn" data-act="evStampa" data-id="${e.id}">Stampa o salva in PDF</button>${wa&&!chiuso?`<a class="btn" target="_blank" rel="noopener" href="${wa}" data-act="evWa" data-id="${e.id}">Manda su WhatsApp</a>`:""}${!chiuso?`<button class="btn" data-act="evModifica" data-id="${e.id}">Modifica</button>`:""}</div>
+  ${m.caparra?`<div class="panel" style="margin-top:12px"><h3 style="margin-bottom:8px">Registra la caparra</h3><div class="fgrid"><label>Importo €<input type="text" inputmode="decimal" id="evc-imp" value="${esc(String(c.pagata||c.richiesta||"").replace(".",","))}" autofocus></label><label>Come ha pagato<select id="evc-met">${Object.entries(EV_MET).map(([k,l])=>`<option value="${k}" ${k===(c.metodo||"bonifico")?"selected":""}>${l}</option>`).join("")}</select></label></div><p class="small muted" style="margin:8px 0">Qui la segni soltanto. Lo scontrino o la fattura li emetti come fai di solito.</p><div class="row"><button class="btn primary" data-act="evCaparraOk" data-id="${e.id}">Registra</button><button class="btn" data-act="evCaparraNo">Annulla</button></div></div>`:""}
+  <div class="row" style="margin-top:12px;border-top:1px solid var(--line);padding-top:12px">
+  ${e.stato==="bozza"?`<button class="btn" data-act="evStato" data-id="${e.id}" data-v="inviato">Segna come inviato</button>`:""}
+  ${["bozza","inviato"].includes(e.stato)?`<button class="btn primary" data-act="evCaparra">Registra la caparra</button><button class="btn" data-act="evStato" data-id="${e.id}" data-v="confermato">Conferma senza caparra</button>`:""}
+  ${e.stato==="confermato"?`<button class="btn" data-act="evCaparra">${c.pagata?"Cambia la caparra":"Registra la caparra"}</button><button class="btn" data-act="evStato" data-id="${e.id}" data-v="svolto">Segna come svolto</button>`:""}
+  ${!chiuso?(UI.pending==="evann:"+e.id?`<span class="confirm">Annullare l'evento? <button class="btn sm danger" data-act="evStato" data-id="${e.id}" data-v="annullato">Annulla l'evento</button><button class="btn sm" data-act="cancel">No</button></span>`:`<button class="btn ghost" data-act="evAnnulla" data-id="${e.id}">Annulla l'evento</button>`):""}
+  ${chiuso?`<button class="btn" data-act="evStato" data-id="${e.id}" data-v="bozza">Riapri</button>`:""}
+  ${["bozza","annullato"].includes(e.stato)&&!c.pagata?(UI.pending==="evdel:"+e.id?`<span class="confirm">Cancellare il preventivo? <button class="btn sm danger" data-act="evElimina" data-id="${e.id}">Cancella</button><button class="btn sm" data-act="cancel">No</button></span>`:`<button class="btn ghost" data-act="evDel" data-id="${e.id}">Cancella</button>`):""}
+  </div>`},
 cliTav(m){const t=T(UI.selT);if(!t)return null;const q=(m.q||"").toLowerCase().trim(),qn=telN(q);
   const lista=(S.clienti||[]).filter(c=>!q||c.nome.toLowerCase().includes(q)||(qn.length>=3&&telN(c.tel).includes(qn))).sort((a,b)=>(b.ultima||0)-(a.ultima||0)).slice(0,8);
   if(m.nuovo||!(S.clienti||[]).length)return mhead("Nuovo cliente abituale",esc(tavLabel(t)))+formCliente({},true)+((S.clienti||[]).length?`<button class="btn sm ghost" data-act="cliCercaTorna">Torna alla ricerca</button>`:"");
@@ -1492,6 +1585,22 @@ assistenza(m){const a=contattoAss();
 const val=id=>($(id)||{}).value;
 const pulisci=(...ids)=>ids.forEach(i=>UI.clear.add(i));
 const ACT={
+  evNuovo(){openModal("evEdit",{wide:true})},
+  evFiltro(d){UI.evFiltro=d.v;render()},
+  evApri(d){UI.pending=null;openModal("evView",{id:d.id,wide:true})},
+  evModifica(d){openModal("evEdit",{id:d.id,wide:true})},
+  evAddPiatto(){const s=$("ev-add"),t=$("ev-menu");if(!s||!t||!s.value)return;t.value=(t.value.trim()?t.value.replace(/\s+$/,"")+"\n":"")+s.value;s.value="";t.dispatchEvent(new Event("input",{bubbles:true}))},
+  async evSalva(d){const ex=[0,1,2,3].map(i=>({desc:val("evx-d-"+i),prezzo:val("evx-p-"+i)})).filter(x=>(x.desc||"").trim());
+    const j=await api("ev.salva",{ev:{id:d.id||undefined,nome:val("ev-nome"),tel:val("ev-tel"),email:val("ev-email"),tipo:val("ev-tipo"),titolo:val("ev-titolo"),data:val("ev-data"),ora:val("ev-ora"),oraFine:val("ev-orafine"),sala:val("ev-sala"),persone:val("ev-pers"),bambini:val("ev-bimbi"),prezzo:val("ev-prezzo"),prezzoBimbi:val("ev-prezzob"),menu:val("ev-menu"),extra:ex,caparra:val("ev-cap"),valido:val("ev-valido"),note:val("ev-note"),condizioni:val("ev-cond")}});
+    if(j){toast(j.msg||"Salvato");openModal("evView",{id:j.nuovoId||d.id,wide:true})}},
+  evStampa(d){const e=EVn(d.id);if(!e)return;const w=window.open("","_blank");if(!w){toast("Il browser ha bloccato la finestra: consenti i popup per Tavolo",true);return}w.document.open();w.document.write(htmlPreventivo(e));w.document.close()},
+  evWa(d){const e=EVn(d.id);if(e&&e.stato==="bozza")api("ev.stato",{id:e.id,stato:"inviato"});return true},
+  evCaparra(){UI.modal.caparra=true;renderModal()},evCaparraNo(){UI.modal.caparra=false;renderModal()},
+  async evCaparraOk(d){const j=await api("ev.caparra",{id:d.id,importo:val("evc-imp"),metodo:val("evc-met")});if(j){toast(j.msg);UI.modal.caparra=false;renderModal()}},
+  async evStato(d){UI.pending=null;const j=await api("ev.stato",{id:d.id,stato:d.v});if(j){toast(j.msg);renderModal()}},
+  evAnnulla(d){UI.pending="evann:"+d.id;renderModal()},
+  evDel(d){UI.pending="evdel:"+d.id;renderModal()},
+  async evElimina(d){UI.pending=null;if(await api("ev.elimina",{id:d.id})){toast("Preventivo cancellato");closeModal();render()}},
   setup:async()=>{const pin=val("suPin");if(!/^\d{4}$/.test(pin)){toast("Il PIN deve avere 4 cifre",true);return}if(pin!==val("suPin2")){toast("I due PIN non coincidono",true);return}if(!val("suNome").trim()){toast("Scrivi il nome del locale",true);return}
     try{await richiesta("/api/setup",{method:"POST",body:JSON.stringify({nome:val("suNome"),tipo:val("suTipo"),citta:val("suCitta"),modello:val("suModello"),tavoli:val("suTavoli"),nomeTitolare:val("suTit"),pin,demo:$("suDemo").checked})});toast("Locale creato: entra con il tuo PIN");avvio()}catch(e){toast(e.message,true)}},
   pinDimenticato(){const id=UI.pinUser;UI.pinUser=null;UI.pin="";schermataSblocco(id)},

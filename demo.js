@@ -9,9 +9,9 @@
       return;
     }
   } catch (e) {}
-  var VERSIONE = "1.10.1-demo";
+  var VERSIONE = "1.11.0-demo";
   var ASS = { nome: "Alberto Malic · Tavolo", tel: "349 699 1941", email: "malicalberto604@gmail.com" };
-  var KEY = "tavolo-demo-v2", DURATA = 3 * 864e5;
+  var KEY = "tavolo-demo-v3", DURATA = 3 * 864e5;
 
   /* ---- piccolo sostituto di crypto/Buffer di Node, sufficiente per la demo ---- */
   var hex = function (a) { return Array.prototype.map.call(a, function (x) { return x.toString(16).padStart(2, "0"); }).join(""); };
@@ -197,6 +197,18 @@ function seedDemo(o) {
    ["Involtini di pesce spada", "Pesce spada, pangrattato, pecorino e agrumi", "Swordfish rolls with breadcrumbs, pecorino and citrus"], ["Cannolo", "Cialda croccante e ricotta di pecora, riempito al momento", "Crispy shell filled with sheep ricotta on the spot"]]
     .forEach(([n, it, en]) => { const m = by(n); if (m) { m.desc = it; m.descTr = { en }; } });
   if (by("Involtini di pesce spada")) by("Involtini di pesce spada").surg = true;
+  // eventi di esempio (1.11)
+  S.settings.moduli.eventi = true; S.contatori.evento = 3;
+  const g = n => dkey(now + n * 864e5), cap = (r, pg, met) => ({ richiesta: r, pagata: pg, metodo: met || "", quando: pg ? now - 2 * 864e5 : null });
+  const cond = COND_EVENTO.join("\n");
+  S.eventi = [
+    { id: uid(), num: 1, stato: "confermato", creato: now - 9 * 864e5, confermato: now - 2 * 864e5, da: staff[0].nome, nome: "Famiglia Pappalardo", tel: "333 555 0201", email: "", tipo: "Comunione", titolo: "Prima comunione di Giulia", data: g(9), ora: "13:00", oraFine: "17:00", persone: 38, bambini: 9, sala: "Sala interna",
+      menu: ["Antipasto: arancinette, panelle e crocchè, caponata", "Primo: busiate al pesto trapanese", "Secondo: involtini di pesce spada con insalata", "Torta della comunione e spumante", "Acqua, vino della casa e caffè"], prezzo: 38, prezzoBimbi: 18, extra: [{ desc: "Allestimento tavoli e fiori", prezzo: 120 }], note: "Due invitati celiaci", condizioni: cond, valido: 15, caparra: cap(500, 500, "bonifico") },
+    { id: uid(), num: 2, stato: "inviato", creato: now - 3 * 864e5, inviato: now - 3 * 864e5, da: staff[0].nome, nome: "Studio Leotta", tel: "333 555 0104", email: "", tipo: "Cena aziendale", titolo: "Cena di Natale", data: g(24), ora: "20:30", oraFine: "", persone: 22, bambini: 0, sala: "Locale intero",
+      menu: ["Aperitivo di benvenuto", "Antipasto della casa", "Pasta con le sarde", "Polpette al sugo", "Cassata", "Vino, acqua e caffè"], prezzo: 35, prezzoBimbi: 0, extra: [], note: "Vogliono la fattura", condizioni: cond, valido: 15, caparra: cap(230, 0) },
+    { id: uid(), num: 3, stato: "bozza", creato: now - 864e5, da: staff[0].nome, nome: "Marco Caruso", tel: "333 555 0105", email: "", tipo: "Compleanno", titolo: "30 anni di Marco", data: g(16), ora: "21:00", oraFine: "", persone: 15, bambini: 0, sala: "Dehors",
+      menu: ["Pizze a giro", "Fritti misti", "Bibite e birra"], prezzo: 20, prezzoBimbi: 0, extra: [{ desc: "Torta personalizzata", prezzo: 45 }], note: "", condizioni: cond, valido: 15, caparra: cap(100, 0) }];
+  S.eventi.forEach(e => sincronizzaPrenEvento(S, e));
   log(S, staff[0], "Dati di esempio caricati");
   return S;
 }
@@ -427,7 +439,22 @@ function formazioneInScadenza(S, ora) {
 }
 
 /* ---------- Dati nuovi (1.8) su locali creati con versioni precedenti ---------- */
-const ELENCHI_18 = ["clienti", "turni", "presenze", "attesa", "richiesteQr", "fatture", "intestatari", "haccpReg"];
+const ELENCHI_18 = ["clienti", "turni", "presenze", "attesa", "richiesteQr", "fatture", "intestatari", "haccpReg", "eventi"];
+/* ---------- Eventi (1.11) ---------- */
+const TIPI_EVENTO = ["Compleanno", "Comunione", "Cresima", "Battesimo", "Matrimonio", "Laurea", "Cena aziendale", "Anniversario", "Festa privata", "Altro"];
+const STATI_EVENTO = { bozza: "bozza", inviato: "preventivo inviato", confermato: "confermato", svolto: "svolto", annullato: "annullato" };
+const METODI_EVENTO = { contanti: "contanti", carta: "carta", bonifico: "bonifico", satispay: "app di pagamento", "": "" };
+const COND_EVENTO = ["Il preventivo è valido per i giorni indicati: dopo va riconfermato.", "La prenotazione è confermata con il versamento della caparra.", "Il numero definitivo degli invitati va comunicato almeno 3 giorni prima: si paga per il numero comunicato.", "In caso di disdetta meno di 7 giorni prima, la caparra resta al locale.", "Allergie e intolleranze vanno comunicate in anticipo."];
+const numV = (v, min, max) => v === "" || v == null ? null : num(String(v).replace(",", "."), min, max);
+const righeTesto = (v, maxRighe, maxLen) => String(v == null ? "" : v).split(/\r?\n/).map(r => txt(r, maxLen)).filter(Boolean).slice(0, maxRighe);
+const totaleEvento = ev => round2((ev.persone || 0) * (ev.prezzo || 0) + (ev.bambini || 0) * (ev.prezzoBimbi || 0) + (ev.extra || []).reduce((s, x) => s + (x.prezzo || 0), 0));
+function sincronizzaPrenEvento(S, ev) {
+  const pr = S.prenotazioni.find(x => x.evento === ev.id);
+  if (ev.stato !== "confermato" && ev.stato !== "svolto") { if (pr && pr.stato === "attesa") pr.stato = "annullata"; return; }
+  const dati = { data: ev.data, ora: ev.ora, nome: ev.nome, tel: ev.tel, persone: Math.min(200, (ev.persone || 0) + (ev.bambini || 0)), note: `Evento: ${ev.tipo}${ev.sala ? " · " + ev.sala : ""}${ev.note ? " · " + ev.note : ""}`.slice(0, 160) };
+  if (pr) { Object.assign(pr, dati); if (pr.stato === "annullata" && ev.stato === "confermato") pr.stato = "attesa"; }
+  else S.prenotazioni.push(Object.assign({ id: uid(), tavolo: "", stato: "attesa", da: "Eventi", evento: ev.id }, dati));
+}
 function normalizza(S) {
   if (!S) return S;
   ELENCHI_18.forEach(k => { if (!Array.isArray(S[k])) S[k] = []; });
@@ -874,7 +901,7 @@ const AZIONI = {
   }],
   "imp.aspetto": ["admin", (S, p) => { if (/^#[0-9a-fA-F]{6}$/.test(p.accent || "")) S.settings.accent = p.accent; if (["auto", "chiaro", "scuro"].includes(p.tema)) S.settings.tema = p.tema; }],
   "imp.modulo": ["tecnico", (S, p, u, out, ctx) => {
-    const k = p.k; if (!["prenotazioni", "magazzino", "cucina", "consegne", "ai", "qr", "clienti", "turni", "attesa", "haccp"].includes(k)) no("Modulo non valido");
+    const k = p.k; if (!["prenotazioni", "magazzino", "cucina", "consegne", "ai", "qr", "clienti", "turni", "attesa", "haccp", "eventi"].includes(k)) no("Modulo non valido");
     if (!S.settings.moduli[k] && ctx.piano === "bar" && (k === "cucina" || k === "magazzino")) no("Questo modulo è incluso dal piano Ristorante: contatta l'assistenza");
     S.settings.moduli[k] = !S.settings.moduli[k]; log(S, u, `Modulo ${k} ${S.settings.moduli[k] ? "attivato" : "spento"}`);
     if (k === "cucina" && !S.settings.moduli.cucina && S.staff.some(x => x.ruolo === "cucina")) out.msg = "Cucina e bar spento: chi ha il ruolo Cucina non vedrà più le comande";
@@ -1016,6 +1043,53 @@ const AZIONI = {
   "fatt.rubricaTogli": ["cassa", (S, p) => { S.intestatari = S.intestatari.filter(y => (y.piva || y.cf) !== p.k); }],
 
   /* ----- HACCP (1.9) ----- */
+  /* ---------- Eventi privati e preventivi (1.11) ---------- */
+  "ev.salva": ["cassa", (S, p, u, out) => {
+    if (!S.settings.moduli.eventi) no("Il modulo Eventi è spento");
+    const d = p.ev || {}, vecchio = d.id ? S.eventi.find(e => e.id === d.id) || no("Evento non trovato") : null;
+    if (vecchio && ["svolto", "annullato"].includes(vecchio.stato)) no("Questo evento è chiuso: non si può più modificare");
+    const nome = txt(d.nome, 60), data = dataOk(d.data), ora = oraOk(d.ora) || "20:00";
+    if (!nome) no("Scrivi il nome del cliente"); if (!data) no("Scegli il giorno dell'evento");
+    const persone = Math.round(numV(d.persone, 1, 2000) || 0), bambini = Math.round(numV(d.bambini, 0, 2000) || 0);
+    if (!persone) no("Scrivi quanti adulti sono");
+    const pp = numV(d.prezzo, 0, 10000), pb = numV(d.prezzoBimbi, 0, 10000) || 0;
+    if (pp == null) no("Prezzo a persona non valido");
+    const menu = righeTesto(d.menu, 40, 120);
+    const extra = (Array.isArray(d.extra) ? d.extra : []).slice(0, 8).map(x => ({ desc: txt(x && x.desc, 80), prezzo: numV(x && x.prezzo, 0, 100000) })).filter(x => x.desc && x.prezzo != null).map(x => ({ desc: x.desc, prezzo: round2(x.prezzo) }));
+    const ev = vecchio || { id: uid(), num: (S.contatori.evento = (S.contatori.evento || 0) + 1), stato: "bozza", creato: Date.now(), da: u.nome, caparra: { richiesta: 0, pagata: 0, metodo: "", quando: null } };
+    Object.assign(ev, { nome, tel: txt(d.tel, 30), email: txt(d.email, 80), tipo: TIPI_EVENTO.includes(d.tipo) ? d.tipo : "Altro", titolo: txt(d.titolo, 60), data, ora, oraFine: oraOk(d.oraFine) || "",
+      persone, bambini, sala: txt(d.sala, 40), menu, prezzo: round2(pp), prezzoBimbi: round2(pb), extra, note: txt(d.note, 300), condizioni: righeTesto(d.condizioni, 12, 300).join("\n"), valido: Math.round(numV(d.valido, 1, 90) || 15) });
+    const tot = totaleEvento(ev), cr = numV(d.caparra, 0, 1e6);
+    ev.caparra.richiesta = round2(cr == null ? Math.round(tot * 0.3) : Math.min(cr, tot));
+    if (!vecchio) { S.eventi.push(ev); log(S, u, `Preventivo evento n. ${ev.num}: ${ev.tipo} di ${nome}, ${data}`); out.msg = "Preventivo salvato"; }
+    else { log(S, u, `Evento n. ${ev.num} modificato`); out.msg = "Evento aggiornato"; }
+    sincronizzaPrenEvento(S, ev); out.nuovoId = ev.id;
+  }],
+  "ev.stato": ["cassa", (S, p, u, out) => {
+    const ev = S.eventi.find(e => e.id === p.id) || no("Evento non trovato");
+    const st = ["bozza", "inviato", "confermato", "svolto", "annullato"].includes(p.stato) ? p.stato : no("Stato non valido");
+    if (ev.stato === "annullato" && st !== "bozza") no("Prima riapri l'evento");
+    ev.stato = st; if (st === "inviato") ev.inviato = Date.now(); if (st === "confermato") ev.confermato = Date.now();
+    log(S, u, `Evento n. ${ev.num} (${ev.nome}): ${STATI_EVENTO[st]}`); sincronizzaPrenEvento(S, ev);
+    out.msg = { inviato: "Segnato come inviato al cliente", confermato: S.settings.moduli.prenotazioni ? "Confermato: è anche nelle Prenotazioni del giorno" : "Evento confermato", svolto: "Evento segnato come svolto", annullato: "Evento annullato", bozza: "Evento riaperto" }[st];
+  }],
+  "ev.caparra": ["cassa", (S, p, u, out) => {
+    const ev = S.eventi.find(e => e.id === p.id) || no("Evento non trovato");
+    const v = numV(p.importo, 0, 1e6); if (v == null) no("Importo non valido");
+    if (ev.stato === "annullato" && v > 0) no("L'evento è annullato: puoi solo togliere la caparra");
+    const met = ["contanti", "carta", "bonifico", "satispay"].includes(p.metodo) ? p.metodo : no("Scegli come ha pagato");
+    ev.caparra.pagata = round2(v); ev.caparra.metodo = v ? met : ""; ev.caparra.quando = v ? Date.now() : null;
+    if (v && ["bozza", "inviato"].includes(ev.stato)) { ev.stato = "confermato"; ev.confermato = Date.now(); }
+    log(S, u, `Evento n. ${ev.num}: caparra ${eur(v)} (${METODI_EVENTO[met]})`); sincronizzaPrenEvento(S, ev);
+    out.msg = v ? "Caparra registrata: l'evento è confermato" : "Caparra tolta";
+  }],
+  "ev.elimina": ["cassa", (S, p, u) => {
+    const ev = S.eventi.find(e => e.id === p.id) || no("Evento non trovato");
+    if (!["bozza", "annullato"].includes(ev.stato)) no("Si cancellano solo le bozze e gli eventi annullati: prima annullalo");
+    if (ev.caparra && ev.caparra.pagata) no("C'è una caparra registrata: toglila prima di cancellare");
+    S.prenotazioni = S.prenotazioni.filter(x => x.evento !== ev.id);
+    S.eventi = S.eventi.filter(e => e !== ev); log(S, u, `Preventivo n. ${ev.num} cancellato`);
+  }],
   "haccp.conf": ["admin", (S, p, u) => {
     const c = S.haccp.conf, d = p.conf || {};
     c.resp = txt(d.resp, 60); c.controlli = +d.controlli === 1 ? 1 : 2;
@@ -1151,7 +1225,7 @@ function validaBackup(o) {
     && o.staff.some(s => s.ruolo === "titolare" && s.pinHash);
 }
 
-module.exports = { haccpMancanti, formazioneInScadenza, TIPI_ATTR, FREQ, AZIONI_CORR, pivaOk, cfOk, calcolaFattura, righeDaVendita, xmlFattura, nomeFileFattura, nomeCliente, fiscCompleti, REGIMI, ALIQUOTE, FORFETTARI, SOGLIA_BOLLO, latino, normalizza, testoRiepilogo, telNorm, puntiConf, LINGUE, posGriglia, piattaforme, PIATTAFORME_BASE, giorno, ORA_CAMBIO_GIORNO, prezzoRiga, REPARTI, RUOLI, METODI, ALLERGENI, ALLERGENI_EN, AZIONI, ACCESSO, applica, creaStato, presetMenu, statoPubblico, verificaPin, hashPin, validaBackup, testoComanda, testoPreconto, testoAvviso, dkey, eur, round2, uid };
+module.exports = { TIPI_EVENTO, STATI_EVENTO, METODI_EVENTO, COND_EVENTO, totaleEvento, haccpMancanti, formazioneInScadenza, TIPI_ATTR, FREQ, AZIONI_CORR, pivaOk, cfOk, calcolaFattura, righeDaVendita, xmlFattura, nomeFileFattura, nomeCliente, fiscCompleti, REGIMI, ALIQUOTE, FORFETTARI, SOGLIA_BOLLO, latino, normalizza, testoRiepilogo, telNorm, puntiConf, LINGUE, posGriglia, piattaforme, PIATTAFORME_BASE, giorno, ORA_CAMBIO_GIORNO, prezzoRiga, REPARTI, RUOLI, METODI, ALLERGENI, ALLERGENI_EN, AZIONI, ACCESSO, applica, creaStato, presetMenu, statoPubblico, verificaPin, hashPin, validaBackup, testoComanda, testoPreconto, testoAvviso, dkey, eur, round2, uid };
 
 })(require, module, Buffer);
   var L = module.exports;
