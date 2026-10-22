@@ -399,6 +399,32 @@ const copertoTot=t=>t.posti>0?t.coperti*S.settings.coperto:0;
 const scontoVal=t=>{if(!t.sconto)return 0;const l=sub(t)+copertoTot(t);return Math.min(l,t.sconto.tipo==="%"?l*t.sconto.val/100:t.sconto.val)};
 const tTot=t=>round2(sub(t)+copertoTot(t)-scontoVal(t));
 const lowStock=()=>S.ing.filter(i=>i.qta<=i.soglia);
+/* ---------- Ordini ai fornitori ed etichette (1.12) ---------- */
+const ORD=()=>S.ordini||[];
+const inOrd=()=>new Set(ORD().filter(o=>o.stato==="inviato").flatMap(o=>o.righe.map(r=>r.iid)));
+const daOrd=()=>{const g=inOrd();return S.ing.filter(i=>i.qta<=i.soglia&&!g.has(i.id))};
+const qSug=i=>{const obj=i.obj>i.soglia?i.obj:i.soglia*3;return Math.round(Math.max(obj-i.qta,i.soglia||1)*1000)/1000};
+const FORN=id=>(S.fornitori||[]).find(f=>f.id===id);
+const gruppiOrdine=()=>{const g={};daOrd().forEach(i=>(g[i.forn&&FORN(i.forn)?i.forn:""]=g[i.forn&&FORN(i.forn)?i.forn:""]||[]).push(i));return g};
+const testoOrdine=(f,righe,nota)=>`Buongiorno ${f.nome},\nsono ${me().nome} di ${S.settings.nome}. Vorremmo ordinare:\n${righe.map(r=>`- ${r.nome}: ${fmtQ(r.q)} ${r.um}`).join("\n")}${nota?`\n\nNote: ${nota}`:""}\n\nGrazie, a presto!`;
+const CONS={frigo:"In frigorifero 0/+4 °C",congelatore:"In congelatore -18 °C",sottovuoto:"Sottovuoto, in frigorifero",ambiente:"A temperatura ambiente"};
+const CONS_BREVE={frigo:"Frigo 0/+4 °C",congelatore:"Congelatore -18 °C",sottovuoto:"Sottovuoto, frigo",ambiente:"Ambiente"};
+const ETIC=()=>(S.etichette||[]);
+const etInUso=()=>ETIC().filter(e=>e.stato==="in uso").sort((a,b)=>a.scad-b.scad);
+const dataOra=t=>new Date(t).toLocaleDateString("it-IT",{day:"2-digit",month:"2-digit"})+" "+hhmm(t);
+const statoScad=e=>{const t=now();if(e.scad<t)return["crit","Scaduta"];if(dkey(e.scad)===dkey(t))return["warn","Scade oggi"];if(dkey(e.scad)===dkey(t+864e5))return["warn","Scade domani"];return["ok","Scade il "+new Date(e.scad).toLocaleDateString("it-IT",{day:"2-digit",month:"2-digit"})]};
+const durataTxt=h=>{const g=Math.floor(h/24),o=h%24;return[g?g+(g===1?" giorno":" giorni"):"",o?o+(o===1?" ora":" ore"):""].filter(Boolean).join(" e ")};
+const puoPrep=()=>["titolare","cassa","cucina"].includes(me().ruolo);
+function htmlEtichette(e,formato,salta){const nome=esc(S.settings.nome),all=e.all.length?e.all.map(a=>ALLERGENI[a-1]).join(", "):"nessuno dei 14 allergeni",rot=formato==="rotolo";
+  const una=`<div class="et"><div class="n">${esc(e.nome)}</div><div class="s">SCADE ${dataOra(e.scad)}</div><div class="a"><b>Allergeni:</b> ${esc(all)}</div><div class="i">Preparato ${dataOra(e.t)} · ${esc(CONS_BREVE[e.cons]||"")}</div><div class="i">Lotto ${esc(e.lotto)} · ${esc(e.c)} · ${nome}</div></div>`;
+  const vuote=rot?0:Math.max(0,Math.min(23,(parseInt(salta,10)||1)-1));
+  const css=rot?`@page{size:62mm 29mm;margin:0}body{margin:0}.et{width:62mm;height:29mm;padding:1.6mm 2.2mm;box-sizing:border-box;page-break-after:always;overflow:hidden}.n{font-size:10pt}.s{font-size:9pt}.a,.i{font-size:6.6pt}`
+    :`@page{size:A4;margin:0}body{margin:0}.foglio{display:grid;grid-template-columns:repeat(3,70mm);grid-auto-rows:37.125mm;width:210mm}.et{padding:2.6mm 3.2mm;box-sizing:border-box;overflow:hidden;height:37.125mm}.n{font-size:11pt}.s{font-size:10pt}.a,.i{font-size:7.4pt}`;
+  return`<!doctype html><html lang="it"><head><meta charset="utf-8"><title>Etichette ${esc(e.nome)} · ${esc(e.lotto)}</title><style>*{-webkit-print-color-adjust:exact;print-color-adjust:exact}body{font-family:Arial,Helvetica,sans-serif;color:#000}${css}
+  .n{font-weight:700;line-height:1.15;max-height:2.35em;overflow:hidden}.s{font-weight:700;border:1.2px solid #000;border-radius:2px;display:inline-block;padding:0 3px;margin:1.2mm 0 1mm}.a{line-height:1.2;max-height:2.45em;overflow:hidden}.a b{text-transform:uppercase}.i{color:#222;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  @media screen{body{background:#eee;padding:12px}.foglio,.et{background:#fff}.et{outline:1px dashed #bbb}.rot .et{margin-bottom:8px}}</style></head><body>
+  ${rot?`<div class="rot">${Array(e.n).fill(una).join("")}</div>`:`<div class="foglio">${Array(vuote).fill('<div class="et"></div>').join("")}${Array(e.n).fill(una).join("")}</div>`}
+  <script>setTimeout(()=>print(),400)<\/script></body></html>`}
 const foodCost=item=>item.ing.reduce((s,[id,q])=>{const g=ING(id);return s+(g?g.costo*q:0)},0);
 const avail=item=>item.disp&&(!S.settings.moduli.magazzino||item.ing.every(([id,q])=>{const g=ING(id);return !g||g.qta>=q}));
 const presOggiTav=tid=>S.prenotazioni.find(p=>p.data===dkey(now())&&p.tavolo===tid&&p.stato==="attesa");
@@ -418,7 +444,7 @@ const oreTurno=x=>{const[a,b]=[x.inizio,x.fine].map(h=>{const[hh,mm]=h.split(":"
 
 /* ---------- Assistenza ---------- */
 const telNum=t=>String(t||"").replace(/[^\d+]/g,"");
-const waNum=t=>{let d=String(t||"").replace(/\D/g,"");if(d.startsWith("00"))d=d.slice(2);if(d.length===10&&d[0]==="3")d="39"+d;return d};
+const waNum=t=>{let d=String(t||"").replace(/\D/g,"");if(d.startsWith("00"))d=d.slice(2);if((d.length===10&&d[0]==="3")||(d[0]==="0"&&d.length>=6&&d.length<=11))d="39"+d;return d};
 function contattoAss(){
   if(S&&S.meta&&S.meta.licenza&&S.meta.licenza.assistenza)return S.meta.licenza.assistenza;
   if(INFO&&INFO.assistenza)return INFO.assistenza;
@@ -760,6 +786,8 @@ function puliziaDovuta(p){const ult=REG().filter(r=>r.k==="pulizia"&&r.p===p.id)
 const descReg=r=>r.k==="temp"?`${esc(r.an)} · ${gradi(r.v)} <span class="small muted">(${r.min}/${r.max} °C · ${FASCE[r.f]||""})</span>`
   :r.k==="merce"?`Merce: ${esc(r.prod)} da ${esc(r.forn)}${r.lotto?` · lotto ${esc(r.lotto)}`:""}${r.scad?` · scad. ${dataIt(r.scad)}`:""}${r.temp!=null?` · ${gradi(r.temp)}`:""}`
   :r.k==="pulizia"?`Pulizia: ${esc(r.pn)}`:r.k==="abbatt"?`${r.tipo==="surg"?"Surgelazione":"Abbattimento"}: ${esc(r.prod)} · da ${gradi(r.t0)} a ${gradi(r.t1)} in ${r.min} min`
+  :r.k==="etic"?`Etichette: ${esc(r.prod)} · lotto ${esc(r.lotto)} · scade ${dataOra(r.scad)} · ${esc(CONS_BREVE[r.cons]||"")}${r.all&&r.all.length?` · allergeni ${r.all.join(", ")}`:""}${r.pz?` · ${r.pz} etichett${r.pz===1?"a":"e"}`:""}`
+  :r.k==="smalt"?`Eliminata: ${esc(r.prod)} · lotto ${esc(r.lotto)} · scadeva ${dataOra(r.scad)}`
   :r.k==="olio"?`Olio ${esc(r.fr)}: ${r.az==="cambio"?"cambiato":"controllato"}${r.v!=null?` · composti polari ${String(r.v).replace(".",",")}%`:""}`:r.k==="infest"?`Controllo infestanti${r.ditta?" (ditta)":""}: ${r.o?"nessuna traccia":"trovate tracce"}`:"Non conformità";
 const rigaReg=(r,annulla)=>`<tr${r.x?' style="opacity:.55"':""}><td class="num small" style="white-space:nowrap">${new Date(r.t).toLocaleDateString("it-IT",{day:"2-digit",month:"2-digit"})} ${hhmm(r.t)}</td><td>${descReg(r)}${r.n?`<div class="small" style="color:${r.o?"var(--muted)":"var(--crit)"}">${r.o?"":"Azione: "}${esc(r.n)}</div>`:""}${r.x?`<div class="small" style="color:var(--crit)">Annullata da ${esc(r.x.chi)}: ${esc(r.x.m)}</div>`:""}</td><td><span class="chip ${r.o?"ok":"crit"}">${r.o?"Conforme":"Non conforme"}</span></td><td class="small">${esc(r.c)}</td>${annulla?`<td class="r">${r.x?"":`<button class="btn sm ghost" data-act="hAnnulla" data-id="${r.id}">Annulla</button>`}</td>`:""}</tr>`;
 function vistaHaccpOggi(){const h=H(),oggi=dkey(now()),reg=REG(),manc=mancantiOggi(),tit=me().ruolo==="titolare";
@@ -770,18 +798,27 @@ function vistaHaccpOggi(){const h=H(),oggi=dkey(now()),reg=REG(),manc=mancantiOg
     <button class="btn primary" style="padding:12px" data-act="hTemp" data-id="${a.id}">Registra temperatura</button></div>`};
   const pul=h.pul.map(p=>({p,...puliziaDovuta(p)}));
   return`${manc.length?`<div class="banner warn" style="margin-bottom:12px">Mancano ${manc.length} controlli di oggi: ${manc.map(x=>esc(x.a.nome)+" ("+FASCE[x.f].toLowerCase()+")").join(", ")}.</div>`:""}
+  ${(()=>{const x=etInUso().filter(e=>e.scad<now()),y=etInUso().filter(e=>e.scad>=now()&&dkey(e.scad)===dkey(now()));return x.length||y.length?`<div class="banner ${x.length?"crit":"warn"}" style="margin-bottom:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap"><span style="flex:1 1 240px">${x.length?`Preparazioni scadute da togliere dal frigo: ${x.map(e=>esc(e.nome)).join(", ")}.`:""} ${y.length?`Scadono oggi: ${y.map(e=>esc(e.nome)+" alle "+hhmm(e.scad)).join(", ")}.`:""}</span><button class="btn sm" data-act="hSez" data-v="etichette">Vedi</button></div>`:""})()}
   ${scad.length?`<div class="banner info" style="margin-bottom:12px">Attestati HACCP in scadenza: ${scad.map(f=>`${esc(f.nome)} (${dataIt(f.scadenza)})`).join(", ")}. Aggiornali in Impostazioni HACCP.</div>`:""}
   <div class="label" style="margin-bottom:8px">Temperature di oggi</div>
   ${h.attr.filter(a=>a.attiva!==false).length?`<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,250px),1fr));gap:12px;margin-bottom:16px">${h.attr.filter(a=>a.attiva!==false).map(card).join("")}</div>`:`<p class="empty">Nessuna attrezzatura. ${tit?"Aggiungile in Impostazioni HACCP.":"Il titolare le aggiunge nelle impostazioni."}</p>`}
   <div class="label" style="margin-bottom:8px">Altre registrazioni</div>
-  <div class="row" style="margin-bottom:16px"><button class="btn" data-act="hMerce">Merce in arrivo</button><button class="btn" data-act="hAbbatt">Abbattimento</button><button class="btn" data-act="hOlio">Olio di frittura</button><button class="btn" data-act="hInfest">Infestanti</button><button class="btn danger" data-act="hNc">Segnala un problema</button></div>
+  <div class="row" style="margin-bottom:16px"><button class="btn" data-act="etNuova">Stampa etichette</button><button class="btn" data-act="hMerce">Merce in arrivo</button><button class="btn" data-act="hAbbatt">Abbattimento</button><button class="btn" data-act="hOlio">Olio di frittura</button><button class="btn" data-act="hInfest">Infestanti</button><button class="btn danger" data-act="hNc">Segnala un problema</button></div>
   <div class="grid2"><div class="panel"><div class="label" style="margin-bottom:6px">Pulizie</div>${pul.length?`<table><tbody>${pul.map(x=>`<tr><td><b>${esc(x.p.area)}</b><div class="small muted">${FREQ_H[x.p.freq]}${x.p.prodotto?" · "+esc(x.p.prodotto):""}${x.ult?` · ultima ${x.ult.g===oggi?"oggi":dataIt(x.ult.g)} (${esc(x.ult.c)})`:""}</div></td><td class="r">${x.dovuta?`<button class="btn sm primary" data-act="hPulito" data-id="${x.p.id}">Fatto</button>`:`<span class="chip ok">Fatto</span>`}</td></tr>`).join("")}</tbody></table>`:`<p class="empty">Nessuna voce nel piano di pulizia.</p>`}</div>
   <div class="panel"><div class="label" style="margin-bottom:6px">Registrato oggi</div>${(()=>{const l=reg.filter(r=>r.g===oggi).sort((a,b)=>b.t-a.t);return l.length?`<table><tbody>${l.slice(0,30).map(r=>`<tr><td class="num small" style="width:48px">${hhmm(r.t)}</td><td>${descReg(r)}${r.n?`<div class="small" style="color:${r.o?"var(--muted)":"var(--crit)"}">${r.o?"":"Azione: "}${esc(r.n)}</div>`:""}<div class="small muted">${esc(r.c)}</div></td><td class="r"><span class="chip ${r.o?"ok":"crit"}">${r.o?"OK":"Non conforme"}</span></td></tr>`).join("")}</tbody></table>`:`<p class="empty">Ancora niente oggi.</p>`})()}</div></div>`}
+function vistaHaccpEtichette(){const L=etInUso(),P=S.preparazioni||[],pp=puoPrep();
+  return`<div class="panel" style="margin-bottom:14px"><div class="spread" style="margin-bottom:8px"><h3>Stampa etichette</h3><button class="btn primary" data-act="etNuova">Altra preparazione</button></div>
+  ${P.length?`<div class="row" style="gap:8px">${P.map(x=>`<button class="btn" data-act="etDa" data-id="${x.id}" title="${esc(durataTxt(x.gg*24+(x.ore||0)))} · ${esc(CONS_BREVE[x.cons])}">${esc(x.nome)}</button>`).join("")}</div>`:`<p class="small muted">Nessuna preparazione salvata: stampa la prima con «Altra preparazione» e spunta «Salva tra le preparazioni».</p>`}</div>
+  <div class="panel" style="margin-bottom:14px"><h3 style="margin-bottom:8px">In frigo adesso <span class="small muted" style="font-weight:400">${L.length} vaschett${L.length===1?"a":"e"}</span></h3>
+  ${L.length?`<div class="tablewrap"><table><thead><tr><th>Preparazione</th><th>Scadenza</th><th>Preparata</th><th>Lotto</th><th class="r"></th></tr></thead><tbody>${L.map(e=>{const[c,t]=statoScad(e);return`<tr><td><b>${esc(e.nome)}</b><div class="small muted">${esc(CONS_BREVE[e.cons]||"")}${e.all.length?" · allergeni "+e.all.join(", "):""}</div></td><td><span class="chip ${c}">${t}</span><div class="small muted num">${dataOra(e.scad)}</div></td><td class="small">${dataOra(e.t)}<br>${esc(e.c)}</td><td class="small num">${esc(e.lotto)}</td>
+  <td class="r"><div class="row" style="justify-content:flex-end;flex-wrap:nowrap"><button class="btn sm" data-act="etFine" data-id="${e.id}" data-v="usata">Finita</button><button class="btn sm ${e.scad<now()?"danger":"ghost"}" data-act="etFine" data-id="${e.id}" data-v="buttata">Buttata</button><button class="btn sm ghost" data-act="etRistampa" data-id="${e.id}">Ristampa</button></div></td></tr>`}).join("")}</tbody></table></div>`:`<p class="empty">Nessuna vaschetta etichettata in frigo.</p>`}</div>
+  ${pp?`<div class="panel"><div class="spread" style="margin-bottom:8px"><h3>Preparazioni salvate</h3><button class="btn sm" data-act="prepEdit">Nuova</button></div>${P.length?`<div class="tablewrap"><table><tbody>${P.map(x=>`<tr><td><b>${esc(x.nome)}</b><div class="small muted">${x.all.length?x.all.map(a=>ALLERGENI[a-1]).join(", "):"Nessun allergene"}</div></td><td class="small">${esc(durataTxt(x.gg*24+(x.ore||0)))}<br>${esc(CONS_BREVE[x.cons])}</td><td class="r"><button class="btn sm ghost" data-act="prepEdit" data-id="${x.id}">Modifica</button></td></tr>`).join("")}</tbody></table></div>`:`<p class="small muted">Nessuna.</p>`}</div>`:""}
+  <p class="note" style="margin-top:12px">Le durate le decide il responsabile HACCP del locale. Le vaschette scadute vanno tolte dal frigo e segnate «Buttata»: l'eliminazione entra nel registro.</p>`}
 function vistaHaccpRegistri(){const m=UI.hMese||dkey(now()).slice(0,7),tit=me().ruolo==="titolare";let dati=UI.hReg&&UI.hReg.mese===m?UI.hReg.registro:null;
   if(dati){const live=new Map((S.haccpReg||[]).filter(r=>r.g.startsWith(m)).map(r=>[r.id,r]));dati=[...dati.filter(r=>!live.has(r.id)),...live.values()]}
   const mesi=[...Array(6)].map((_,i)=>{const d=new Date(now());d.setDate(1);d.setMonth(d.getMonth()-i);return dkey(d).slice(0,7)});
-  const tipi={tutti:"Tutti",temp:"Temperature",merce:"Merci",pulizia:"Pulizie",abbatt:"Abbattimento",olio:"Olio",infest:"Infestanti",nc:"Non conformità"},f=UI.hTipo||"tutti";
-  const lista=(dati||[]).filter(r=>f==="tutti"||(f==="nc"?!r.o:r.k===f)).sort((a,b)=>b.t-a.t);
+  const tipi={tutti:"Tutti",temp:"Temperature",merce:"Merci",etic:"Etichette",pulizia:"Pulizie",abbatt:"Abbattimento",olio:"Olio",infest:"Infestanti",nc:"Non conformità"},f=UI.hTipo||"tutti";
+  const lista=(dati||[]).filter(r=>f==="tutti"||(f==="nc"?!r.o:f==="etic"?r.k==="etic"||r.k==="smalt":r.k===f)).sort((a,b)=>b.t-a.t);
   return`<div class="row" style="margin-bottom:10px"><div class="pills">${mesi.map(x=>`<button data-act="hMese" data-v="${x}" aria-pressed="${x===m}">${new Date(x+"-15").toLocaleDateString("it-IT",{month:"long",year:"numeric"})}</button>`).join("")}</div></div>
   <div class="pills" style="margin-bottom:12px">${Object.entries(tipi).map(([k,l])=>`<button data-act="hTipo" data-v="${k}" aria-pressed="${k===f}">${l}</button>`).join("")}</div>
   <div class="panel"><div class="spread" style="margin-bottom:8px"><span class="label">${dati?lista.length+" registrazioni":"Carico…"}</span><button class="btn" data-act="hStampaReg" ${dati?"":"disabled"}>Stampa i registri del mese</button></div>
@@ -813,11 +850,11 @@ function vistaHaccpManuale(){const c=H().conf,f=FS();
   <div class="small muted">Revisione ${c.rev||1}${c.revData?" del "+dataIt(c.revData):""} · responsabile: ${c.resp?esc(c.resp):"<b>da scrivere in Impostazioni HACCP</b>"} · dati del locale: ${f&&f.den?esc(f.den):"<b>completa Impostazioni → Fatture elettroniche per ragione sociale e partita IVA</b>"}</div>
   <p class="note" style="margin-top:12px">È una base completa da leggere, adattare e firmare: la responsabilità del piano resta del titolare (operatore del settore alimentare). La prima volta fallo vedere a un consulente HACCP. Rifai la revisione quando cambiano menu, attrezzature, locali o personale.</p></div>
   <div class="panel"><h3 style="margin-bottom:6px">Registri da stampare</h3><p class="small">Temperature giorno per giorno, merci in arrivo, pulizie, abbattimento, olio, infestanti e non conformità, con chi ha registrato. Da tenere nel locale per i controlli.</p><div class="row" style="margin-top:10px"><button class="btn" data-act="hVaiRegistri">Scegli il mese e stampa</button></div></div></div>`}
-function vistaHaccp(){const sez=UI.hSez||"oggi",tit=me().ruolo==="titolare",tabs={oggi:"Oggi",registri:"Registri",...(tit?{manuale:"Manuale e stampe",imposta:"Impostazioni HACCP"}:{})};
+function vistaHaccp(){const sez=UI.hSez||"oggi",tit=me().ruolo==="titolare",tabs={oggi:"Oggi",etichette:"Etichette e scadenze",registri:"Registri",...(tit?{manuale:"Manuale e stampe",imposta:"Impostazioni HACCP"}:{})};
   if(sez==="registri"&&(!UI.hReg||UI.hReg.mese!==(UI.hMese||dkey(now()).slice(0,7)))&&!UI.hCarica)caricaRegistri();
   return`<div class="spread" style="margin-bottom:4px"><h2>HACCP</h2></div><p class="lead">Autocontrollo dell'igiene: temperature, merci, pulizie e registri sempre in ordine, con il nome di chi ha fatto ogni controllo.</p>
   <div class="seg" role="group" aria-label="Sezioni HACCP" style="margin-bottom:14px">${Object.entries(tabs).map(([k,l])=>`<button data-act="hSez" data-v="${k}" aria-pressed="${k===sez}">${l}</button>`).join("")}</div>
-  ${sez==="registri"?vistaHaccpRegistri():sez==="imposta"&&tit?vistaHaccpImposta():sez==="manuale"&&tit?vistaHaccpManuale():vistaHaccpOggi()}`};
+  ${sez==="etichette"?vistaHaccpEtichette():sez==="registri"?vistaHaccpRegistri():sez==="imposta"&&tit?vistaHaccpImposta():sez==="manuale"&&tit?vistaHaccpManuale():vistaHaccpOggi()}`};
 async function caricaRegistri(){const m=UI.hMese||dkey(now()).slice(0,7);UI.hCarica=true;try{UI.hReg=await richiesta("/api/haccp?mese="+m)}catch(e){if(e.message!=="401")toast(e.message,true);UI.hReg={mese:m,registro:[]}}UI.hCarica=false;if(UI.tab==="haccp")render()}
 
 /* ---------- HACCP: documenti da stampare ---------- */
@@ -840,6 +877,8 @@ function htmlRegistriHaccp(mese,reg){const d=datiImpresa(),h=H(),R=reg.filter(r=
   ${attr.length?`<table><thead><tr><th>Giorno</th>${attr.map(a=>`<th colspan="${fasce.length}">${esc(a.nome)}<br><span style="font-weight:400">${a.min} / ${a.max}</span></th>`).join("")}<th>Firma</th></tr>${fasce.length>1?`<tr><th></th>${attr.map(()=>fasce.map(f=>`<th style="font-weight:400">${FASCE[f]}</th>`).join("")).join("")}<th></th></tr>`:""}</thead>
   <tbody>${[...Array(giorni)].map((_,i)=>{const g=mese+"-"+String(i+1).padStart(2,"0");return`<tr><td>${i+1}</td>${attr.map(a=>fasce.map(f=>`<td>${cella(a,g,f)}</td>`).join("")).join("")}<td></td></tr>`}).join("")}</tbody></table>`:`<p class="muted">Nessuna attrezzatura.</p>`}
   ${tab("Merci in arrivo","merce",["Fornitore","Prodotto","Lotto","Scadenza","Temp."],r=>[esc(r.forn),esc(r.prod),esc(r.lotto||""),r.scad?dataIt(r.scad):"",r.temp!=null?String(r.temp).replace(".",","):""])}
+  ${tab("Preparazioni etichettate (lotti e scadenze)","etic",["Preparazione","Lotto","Scadenza","Conservazione","Allergeni","Etichette"],r=>[esc(r.prod),esc(r.lotto),dataOra(r.scad),esc(CONS_BREVE[r.cons]||""),r.all&&r.all.length?r.all.map(a=>ALLERGENI[a-1]).join(", "):"—",r.pz||""])}
+  ${tab("Preparazioni eliminate","smalt",["Preparazione","Lotto","Scadeva","Note"],r=>[esc(r.prod),esc(r.lotto),dataOra(r.scad),esc(r.n||"")])}
   ${tab("Pulizie e sanificazione","pulizia",["Cosa","Note"],r=>[esc(r.pn),esc(r.n||"")])}
   ${tab("Abbattimento e surgelazione","abbatt",["Prodotto","Tipo","Inizio °C","Fine °C","Minuti"],r=>[esc(r.prod),r.tipo==="surg"?"Surgelazione":"Refrigerazione",String(r.t0).replace(".",","),String(r.t1).replace(".",","),r.min])}
   ${tab("Olio di frittura","olio",["Friggitrice","Operazione","Composti polari %"],r=>[esc(r.fr),r.az==="cambio"?"Cambio":"Controllo",r.v!=null?String(r.v).replace(".",","):""])}
@@ -1039,18 +1078,19 @@ menu(){
   <td class="r">${m.disp&&!avail(m)?`<span class="chip crit">Esaurito in magazzino</span>`:`<button class="btn sm ${m.disp?"":"danger"}" data-act="disp" data-id="${m.id}">${m.disp?"Disponibile":"Non disponibile"}</button>`}</td><td class="r"><button class="btn sm ghost" data-act="dish" data-id="${m.id}">Modifica</button></td></tr>`).join("")}</tbody></table></div>`:`<p class="empty">Nessun piatto in questa categoria.</p>`}</div>`}).join("")}</div>`;
 },
 magazzino(){
-  const low=lowStock(),fn=id=>(S.fornitori.find(f=>f.id===id)||{nome:"—"}).nome;
-  const valore=S.ing.reduce((s,i)=>s+i.qta*i.costo,0);
-  return`<div class="spread" style="margin-bottom:4px"><h2>Magazzino</h2><div class="row"><button class="btn" data-act="newIng">Nuovo ingrediente</button><button class="btn primary" data-act="ordine" ${low.length?"":"disabled"}>Prepara ordine ai fornitori</button></div></div>
-  <p class="lead">Le scorte scalano da sole a ogni comanda in base alla ricetta del piatto. Sotto la soglia scatta l'avviso, e il piatto si disattiva quando l'ingrediente finisce.</p>
-  <div class="kpis"><div class="kpi"><span class="label">Valore in magazzino</span><b>${eur(valore)}</b></div><div class="kpi"><span class="label">Da riordinare</span><b>${low.length}</b><small>${low.length?low.map(i=>esc(i.nome)).join(", "):"Tutto sopra soglia"}</small></div><div class="kpi"><span class="label">Fornitori</span><b>${S.fornitori.length}</b></div></div>
+  const low=lowStock(),pronti=daOrd(),fn=id=>(FORN(id)||{nome:"—"}).nome,inArrivo=ORD().filter(o=>o.stato==="inviato").sort((a,b)=>b.t-a.t),gi=inOrd();
+  const valore=S.ing.reduce((s,i)=>s+i.qta*i.costo,0),nf=Object.keys(gruppiOrdine()).filter(Boolean).length;
+  return`<div class="spread" style="margin-bottom:4px"><h2>Magazzino</h2><div class="row"><button class="btn" data-act="newIng">Nuovo ingrediente</button><button class="btn primary" data-act="ordine" ${pronti.length?"":"disabled"}>Ordini ai fornitori${pronti.length?` (${nf||pronti.length})`:""}</button></div></div>
+  <p class="lead">Le scorte scalano da sole a ogni comanda in base alla ricetta del piatto. Quando un ingrediente scende sotto la soglia, Tavolo prepara l'ordine per il suo fornitore: tu controlli le quantità e lo mandi su WhatsApp o per email.</p>
+  ${pronti.length?`<div class="banner warn" style="margin-bottom:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap"><span style="flex:1 1 260px">Ordini pronti da mandare${nf?` a ${nf} fornitor${nf===1?"e":"i"}`:""}: ${pronti.map(i=>esc(i.nome)).join(", ")}.</span><button class="btn sm primary" data-act="ordine">Controlla e manda</button></div>`:""}
+  <div class="kpis"><div class="kpi"><span class="label">Valore in magazzino</span><b>${eur(valore)}</b></div><div class="kpi"><span class="label">Sotto soglia</span><b>${low.length}</b><small>${low.length?low.map(i=>esc(i.nome)+(gi.has(i.id)?" (ordinato)":"")).join(", "):"Tutto sopra soglia"}</small></div><div class="kpi"><span class="label">Ordini in arrivo</span><b>${inArrivo.length}</b><small>${inArrivo.length?inArrivo.map(o=>esc(o.fn)).join(", "):"Nessuno"}</small></div></div>
+  ${inArrivo.length?`<div class="panel" style="margin-bottom:16px"><h3 style="margin-bottom:8px">Ordini mandati, in arrivo</h3><div class="tablewrap"><table><tbody>${inArrivo.map(o=>`<tr><td><b>${esc(o.fn)}</b><div class="small muted">Mandato ${dataOra(o.t)} da ${esc(o.c)} · ${({whatsapp:"WhatsApp",email:"email",copia:"copiato"})[o.via]||""}</div></td><td class="small">${o.righe.map(r=>`${esc(r.nome)} ${fmtQ(r.q)} ${r.um}`).join(", ")}</td><td class="r"><div class="row" style="justify-content:flex-end;flex-wrap:nowrap"><button class="btn sm primary" data-act="ordArr" data-id="${o.id}">È arrivato</button><button class="btn sm ghost" data-act="ordAnn" data-id="${o.id}">Annulla</button></div></td></tr>`).join("")}</tbody></table></div></div>`:""}
   <div class="panel" style="margin-bottom:16px">${S.ing.length?`<div class="tablewrap"><table><thead><tr><th>Ingrediente</th><th class="r">Giacenza</th><th>Livello</th><th class="r">Soglia</th><th class="r">Costo</th><th>Fornitore</th><th class="r">Azioni</th></tr></thead><tbody>
   ${S.ing.map(i=>{const p=Math.min(100,i.qta/(Math.max(i.soglia,.01)*3)*100),c=i.qta<=i.soglia?"low":i.qta<=i.soglia*1.5?"mid":"";
-  return`<tr><td>${esc(i.nome)}</td><td class="r num">${fmtQ(i.qta)} ${i.um}</td><td style="min-width:90px"><div class="bar ${c}"><i style="width:${p}%"></i></div></td><td class="r num">${fmtQ(i.soglia)} ${i.um}</td><td class="r num">${eur(i.costo)}/${i.um}</td><td class="small">${esc(fn(i.forn))}</td>
-  <td class="r"><div class="row" style="justify-content:flex-end;flex-wrap:nowrap"><button class="btn sm" data-act="carico" data-id="${i.id}">Carico</button><button class="btn sm ghost" data-act="rettifica" data-id="${i.id}">Conta</button></div></td></tr>`}).join("")}
+  return`<tr><td>${esc(i.nome)}${gi.has(i.id)?` <span class="chip ok">ordinato</span>`:""}</td><td class="r num">${fmtQ(i.qta)} ${i.um}</td><td style="min-width:90px"><div class="bar ${c}"><i style="width:${p}%"></i></div></td><td class="r num">${fmtQ(i.soglia)} ${i.um}</td><td class="r num">${eur(i.costo)}/${i.um}</td><td class="small">${esc(fn(i.forn))}</td>
+  <td class="r"><div class="row" style="justify-content:flex-end;flex-wrap:nowrap"><button class="btn sm" data-act="carico" data-id="${i.id}">Carico</button><button class="btn sm ghost" data-act="rettifica" data-id="${i.id}">Conta</button><button class="btn sm ghost" data-act="ingEdit" data-id="${i.id}">Modifica</button></div></td></tr>`}).join("")}
   </tbody></table></div>`:`<p class="empty">Nessun ingrediente. Aggiungi quelli che vuoi controllare, poi collegali ai piatti con la ricetta (Menu → Modifica).</p>`}</div>
-  <div class="panel"><h3 style="margin-bottom:8px">Fornitori</h3>${S.fornitori.length?`<div class="tablewrap"><table><tbody>${S.fornitori.map(f=>`<tr><td><b>${esc(f.nome)}</b></td><td class="num">${esc(f.tel)}</td><td class="small muted">${S.ing.filter(i=>i.forn===f.id).map(i=>esc(i.nome)).join(", ")||"Nessun ingrediente"}</td></tr>`).join("")}</tbody></table></div>`:`<p class="small muted">Nessun fornitore.</p>`}
-  <div class="row" style="margin-top:12px"><input type="text" id="fNome" placeholder="Nome fornitore" style="flex:2 1 160px"><input type="tel" id="fTel" placeholder="Telefono" style="flex:1 1 120px"><button class="btn" data-act="addForn">Aggiungi fornitore</button></div></div>`;
+  <div class="panel"><div class="spread" style="margin-bottom:8px"><h3>Fornitori</h3><button class="btn sm" data-act="fornEdit">Nuovo fornitore</button></div>${S.fornitori.length?`<div class="tablewrap"><table><tbody>${S.fornitori.map(f=>`<tr><td><b>${esc(f.nome)}</b>${f.note?`<div class="small muted">${esc(f.note)}</div>`:""}</td><td class="small"><span class="num">${esc(f.tel||"")}</span>${f.email?`<br>${esc(f.email)}`:""}</td><td class="small muted">${S.ing.filter(i=>i.forn===f.id).map(i=>esc(i.nome)).join(", ")||"Nessun ingrediente"}</td><td class="r"><button class="btn sm ghost" data-act="fornEdit" data-id="${f.id}">Modifica</button></td></tr>`).join("")}</tbody></table></div>`:`<p class="small muted">Nessun fornitore. Aggiungilo con telefono WhatsApp o email: Tavolo gli prepara gli ordini.</p>`}</div>`;
 },
 cassa(){
   const V=S.vendite,tot=V.reduce((s,v)=>s+v.tot,0),cop=V.reduce((s,v)=>s+v.coperti,0),sc=V.reduce((s,v)=>s+v.sconto,0);
@@ -1563,10 +1603,40 @@ ripristino(){const r=UI.ripristino;if(!r)return null;
 carico(m){const g=ING(m.id);if(!g)return null;return mhead("Carico: "+esc(g.nome),"Giacenza attuale "+fmtQ(g.qta)+" "+g.um)+`<div class="fgrid"><label>Quantità arrivata (${g.um})<input type="number" id="carQ" min="0" step="0.1" autofocus></label><label>Costo per ${g.um} (€)<input type="number" id="carC" min="0" step="0.01" value="${g.costo}"></label></div><button class="btn primary" data-act="carOk">Registra carico</button>`},
 rettifica(m){const g=ING(m.id);if(!g)return null;return mhead("Conta: "+esc(g.nome),"Il gestionale dice "+fmtQ(g.qta)+" "+g.um+". Scrivi quanto ne hai davvero.")+`<div class="fgrid"><label>Quantità contata (${g.um})<input type="number" id="retQ" min="0" step="0.1" value="${g.qta}" autofocus></label><label>Soglia di riordino (${g.um})<input type="number" id="retS" min="0" step="0.1" value="${g.soglia}"></label></div><button class="btn primary" data-act="retOk">Salva</button>`},
 newIng(){return mhead("Nuovo ingrediente")+`<div class="fgrid"><label>Nome<input type="text" id="niNome" autofocus></label><label>Unità<select id="niUm">${["kg","l","pz","bt"].map(u=>`<option>${u}</option>`).join("")}</select></label><label>Giacenza<input type="number" id="niQ" min="0" step="0.1" value="0"></label><label>Soglia di riordino<input type="number" id="niS" min="0" step="0.1" value="1"></label><label>Costo per unità €<input type="number" id="niC" min="0" step="0.01" value="0"></label><label>Fornitore<select id="niF"><option value="">—</option>${S.fornitori.map(f=>`<option value="${f.id}">${esc(f.nome)}</option>`).join("")}</select></label></div><button class="btn primary" data-act="niOk">Aggiungi</button>`},
-ordine(){const low=lowStock(),g={};low.forEach(i=>(g[i.forn||""]=g[i.forn||""]||[]).push(i));
-  return mhead("Ordine ai fornitori","Quantità suggerita: riporta la scorta a tre volte la soglia")+Object.entries(g).map(([fid,list])=>{const f=S.fornitori.find(x=>x.id===fid)||{nome:"Senza fornitore",tel:""};
-  const txt=`Buongiorno ${f.nome}, per ${S.settings.nome} vorrei ordinare:\n`+list.map(i=>`- ${i.nome}: ${fmtQ(Math.max(i.soglia*3-i.qta,i.soglia))} ${i.um}`).join("\n")+`\nGrazie!`;
-  return`<div class="panel"><div class="spread"><b>${esc(f.nome)}</b><span class="num small">${esc(f.tel)}</span></div><textarea rows="${list.length+3}" readonly style="margin:8px 0">${esc(txt)}</textarea><button class="btn sm" data-act="copyTxt" data-v="${esc(txt)}">Copia messaggio</button></div>`}).join("")},
+ordine(){const g=gruppiOrdine(),k=Object.keys(g).sort((a,b)=>(a?0:1)-(b?0:1));
+  if(!k.length)return mhead("Ordini ai fornitori")+`<p class="empty">Niente da ordinare: tutto sopra soglia o già ordinato.</p>`;
+  return mhead("Ordini ai fornitori","Quantità proposte: riportano la scorta al livello ideale (se non c'è, a tre volte la soglia). Correggile se serve.")+k.map(fid=>{const f=FORN(fid),list=g[fid];
+  if(!f)return`<div class="panel" style="margin-bottom:10px"><b>Senza fornitore</b><div class="small muted" style="margin:4px 0 8px">${list.map(i=>esc(i.nome)).join(", ")}: scegli il fornitore con Modifica nella tabella del magazzino.</div></div>`;
+  return`<div class="panel" style="margin-bottom:10px"><div class="spread"><b>${esc(f.nome)}</b><span class="small muted">${esc(f.tel||"")}${f.email?" · "+esc(f.email):""}</span></div>${f.note?`<div class="small muted">${esc(f.note)}</div>`:""}
+  <table style="margin:8px 0"><tbody>${list.map(i=>`<tr><td>${esc(i.nome)}<div class="small muted">in magazzino ${fmtQ(i.qta)} ${i.um} · soglia ${fmtQ(i.soglia)}</div></td><td class="r" style="white-space:nowrap"><input type="text" inputmode="decimal" id="oq-${i.id}" value="${String(qSug(i)).replace(".",",")}" style="width:80px;text-align:right" aria-label="Quantità di ${esc(i.nome)}"> ${i.um}</td></tr>`).join("")}</tbody></table>
+  <label class="small">Note per il fornitore <span class="muted">facoltative</span><input type="text" id="on-${f.id}" maxlength="120" placeholder="es. consegna entro venerdì mattina"></label>
+  <div class="row" style="margin-top:8px">${f.tel?`<button class="btn sm primary" data-act="ordManda" data-f="${f.id}" data-via="whatsapp">Manda su WhatsApp</button>`:""}${f.email?`<button class="btn sm${f.tel?"":" primary"}" data-act="ordManda" data-f="${f.id}" data-via="email">Manda per email</button>`:""}<button class="btn sm ghost" data-act="ordManda" data-f="${f.id}" data-via="copia">Copia il testo</button></div>
+  ${!f.tel&&!f.email?`<div class="small muted" style="margin-top:6px">Aggiungi telefono o email al fornitore per mandarlo con un tocco.</div>`:""}</div>`}).join("")+`<p class="small muted">Dopo l'invio l'ordine passa in «Ordini in arrivo»: quando arriva la merce tocca «È arrivato» e le quantità entrano in magazzino.</p>`},
+ordArr(m){const o=ORD().find(x=>x.id===m.id);if(!o)return null;
+  return mhead("Merce arrivata: "+esc(o.fn),"Controlla le quantità consegnate: entrano in magazzino")+`<table><tbody>${o.righe.map(r=>`<tr><td>${esc(r.nome)}<div class="small muted">ordinati ${fmtQ(r.q)} ${r.um}</div></td><td class="r" style="white-space:nowrap"><input type="text" inputmode="decimal" id="aq-${r.iid}" value="${String(r.q).replace(".",",")}" style="width:80px;text-align:right" aria-label="Arrivati di ${esc(r.nome)}"> ${r.um}</td></tr>`).join("")}</tbody></table>
+  <div class="row" style="margin-top:10px"><button class="btn primary" data-act="ordArrOk" data-id="${o.id}">Carica in magazzino</button></div>${S.settings.moduli.haccp?`<p class="small muted" style="margin-top:8px">Dopo il carico si apre il controllo merce in arrivo dell'HACCP, già compilato con il fornitore.</p>`:""}`},
+ingEdit(m){const i=S.ing.find(x=>x.id===m.id);if(!i)return null;
+  return mhead(esc(i.nome))+`<div class="fgrid"><label>Soglia di riordino (${i.um})<input type="text" inputmode="decimal" id="ie-s" value="${String(i.soglia).replace(".",",")}" autofocus></label><label>Scorta ideale (${i.um}) <span class="small muted">a quanto riportarla</span><input type="text" inputmode="decimal" id="ie-o" value="${i.obj?String(i.obj).replace(".",","):""}" placeholder="${fmtQ(i.soglia*3)}"></label><label>Fornitore<select id="ie-f"><option value="">—</option>${S.fornitori.map(f=>`<option value="${f.id}" ${f.id===i.forn?"selected":""}>${esc(f.nome)}</option>`).join("")}</select></label></div>
+  <p class="small muted">Quando la giacenza scende alla soglia, Tavolo propone l'ordine per arrivare alla scorta ideale.</p><button class="btn primary" data-act="ingEditOk" data-id="${i.id}">Salva</button>`},
+fornEdit(m){const f=m.id?FORN(m.id):{nome:"",tel:"",email:"",note:""};if(!f)return null;
+  return mhead(m.id?"Modifica fornitore":"Nuovo fornitore")+`<div class="fgrid"><label>Nome<input type="text" id="fe-n" value="${esc(f.nome)}" maxlength="50" autofocus></label><label>Telefono WhatsApp<input type="tel" id="fe-t" value="${esc(f.tel||"")}" maxlength="30" placeholder="es. 333 123 4567"></label><label>Email per gli ordini<input type="email" id="fe-e" value="${esc(f.email||"")}" maxlength="80"></label><label>Note <span class="small muted">giorni di consegna, orari</span><input type="text" id="fe-note" value="${esc(f.note||"")}" maxlength="120"></label></div>
+  <div class="row"><button class="btn primary" data-act="fornOk" data-id="${m.id||""}">Salva</button>${m.id?(m.conf?`<button class="btn danger" data-act="fornTogliOk" data-id="${m.id}">Sì, elimina il fornitore</button>`:`<button class="btn ghost" data-act="fornTogli">Elimina</button>`):""}</div>${m.conf?`<p class="small muted">Gli ingredienti di questo fornitore restano, senza fornitore.</p>`:""}`},
+etic(m){const p=m.prep?(S.preparazioni||[]).find(x=>x.id===m.prep):null,d=p||m.d||{nome:"",all:[],gg:3,ore:0,cons:"frigo"},nomi=[...new Set([...(S.preparazioni||[]).map(x=>x.nome),...S.menu.map(x=>x.nome)])];
+  return mhead("Stampa etichette","Per vaschette e preparazioni: allergeni, data di preparazione e scadenza")+`<div class="form">
+  <label>Cosa c'è nella vaschetta<input type="text" id="et-n" value="${esc(d.nome)}" maxlength="60" list="et-nl" autofocus placeholder="es. Ragù di carne"></label><datalist id="et-nl">${nomi.map(n=>`<option value="${esc(n)}">`).join("")}</datalist>
+  <div><div class="label" style="margin-bottom:6px">Allergeni <span class="small muted" style="text-transform:none;letter-spacing:0">tocca per segnarli · se scegli un piatto del menu si compilano da soli</span></div><div class="row" id="et-all" style="gap:6px">${ALLERGENI.map((a,i)=>`<button type="button" class="btn sm" data-act="etAll" data-v="${i+1}" aria-pressed="${d.all.includes(i+1)}" style="${d.all.includes(i+1)?"background:var(--accent);color:#fff;border-color:var(--accent)":""}">${i+1}. ${a}</button>`).join("")}</div></div>
+  <div class="fgrid"><label>Dura giorni<input type="number" id="et-gg" min="0" max="730" value="${d.gg}"></label><label>e ore<input type="number" id="et-ore" min="0" max="23" value="${d.ore||0}"></label><label>Conservazione<select id="et-c">${Object.entries(CONS).map(([k,l])=>`<option value="${k}" ${k===d.cons?"selected":""}>${l}</option>`).join("")}</select></label><label>Quante etichette<input type="number" id="et-q" min="1" max="48" value="${m.n||1}"></label></div>
+  <div class="fgrid"><label>Formato<select id="et-f"><option value="a4">Foglio A4, 24 etichette 70×37 mm</option><option value="rotolo" ${UI.etFmt==="rotolo"?"selected":""}>Rotolo 62×29 mm (stampante di etichette)</option></select></label><label>Sul foglio A4 parti dall'etichetta n.<input type="number" id="et-s" min="1" max="24" value="1"></label></div>
+  <label>Note <span class="small muted">facoltative, vanno nel registro</span><input type="text" id="et-note" maxlength="80"></label>
+  ${puoPrep()&&!p?`<label class="row small" style="gap:6px;font-weight:400"><input type="checkbox" id="et-save"> Salva tra le preparazioni, per stamparla con un tocco la prossima volta</label>`:""}
+  <div class="row"><button class="btn primary" data-act="etStampa" data-prep="${p?p.id:""}">Stampa le etichette</button></div>
+  <p class="small muted">Ogni stampa entra nel registro HACCP con lotto, scadenza e il tuo nome. La vaschetta compare in «In frigo adesso» finché non la segni finita o buttata.</p></div>`},
+prepEdit(m){const x=m.id?(S.preparazioni||[]).find(y=>y.id===m.id):{nome:"",all:[],gg:3,ore:0,cons:"frigo",note:""};if(!x)return null;
+  return mhead(m.id?"Modifica preparazione":"Nuova preparazione","La durata e gli allergeni si riusano a ogni stampa")+`<div class="form"><label>Nome<input type="text" id="pe-n" value="${esc(x.nome)}" maxlength="60" autofocus></label>
+  <div class="row" id="et-all" style="gap:6px">${ALLERGENI.map((a,i)=>`<button type="button" class="btn sm" data-act="etAll" data-v="${i+1}" aria-pressed="${x.all.includes(i+1)}" style="${x.all.includes(i+1)?"background:var(--accent);color:#fff;border-color:var(--accent)":""}">${i+1}. ${a}</button>`).join("")}</div>
+  <div class="fgrid"><label>Dura giorni<input type="number" id="pe-gg" min="0" max="730" value="${x.gg}"></label><label>e ore<input type="number" id="pe-ore" min="0" max="23" value="${x.ore||0}"></label><label>Conservazione<select id="pe-c">${Object.entries(CONS).map(([k,l])=>`<option value="${k}" ${k===x.cons?"selected":""}>${l}</option>`).join("")}</select></label></div>
+  <div class="row"><button class="btn primary" data-act="prepOk" data-id="${m.id||""}">Salva</button>${m.id?`<button class="btn ghost" data-act="prepTogli" data-id="${m.id}">Elimina</button>`:""}</div>
+  <p class="small muted">La durata la decide il responsabile HACCP del locale in base alla ricetta e al manuale di autocontrollo.</p></div>`},
 mov(m){const l={fondo:"Fondo cassa",prelievo:"Prelievo dal cassetto",versamento:"Versamento nel cassetto"}[m.tipo];
   return mhead(l)+`<div class="fgrid"><label>Importo €<input type="number" id="movI" min="0" step="0.5" autofocus></label><label>Causale<input type="text" id="movN" placeholder="${m.tipo==="prelievo"?"es. pagamento fornitore":"es. resto iniziale"}"></label></div><button class="btn primary" data-act="movOk">Registra</button>`},
 assistenza(m){const a=contattoAss();
@@ -1787,6 +1857,42 @@ const ACT={
   async niOk(){if(await api("mag.nuovo",{nome:val("niNome"),um:val("niUm"),qta:val("niQ"),soglia:val("niS"),costo:val("niC"),forn:val("niF")})){toast("Ingrediente aggiunto");closeModal()}},
   ordine(){openModal("ordine",{wide:true})},
   copyTxt(d){copy(d.v)},
+  async ordManda(d){const f=FORN(d.f);if(!f)return;const list=daOrd().filter(i=>i.forn===f.id);
+    const righe=list.map(i=>({iid:i.id,nome:i.nome,um:i.um,q:parseFloat(String(val("oq-"+i.id)||"").replace(",","."))})).filter(r=>r.q>0);
+    if(!righe.length){toast("Metti almeno una quantità",true);return}
+    const t=testoOrdine(f,righe,(val("on-"+f.id)||"").trim());
+    if(d.via==="whatsapp"){const w=window.open("https://wa.me/"+waNum(f.tel)+"?text="+encodeURIComponent(t),"_blank","noopener");if(!w)location.href="https://wa.me/"+waNum(f.tel)+"?text="+encodeURIComponent(t)}
+    else if(d.via==="email"){const a=document.createElement("a");a.href="mailto:"+encodeURIComponent(f.email)+"?subject="+encodeURIComponent("Ordine "+S.settings.nome+" del "+new Date(now()).toLocaleDateString("it-IT"))+"&body="+encodeURIComponent(t);document.body.appendChild(a);a.click();a.remove()}
+    else await copy(t);
+    const j=await api("ord.inviato",{forn:f.id,righe:righe.map(r=>({iid:r.iid,q:r.q})),via:d.via});
+    if(j)setTimeout(()=>{if(UI.modal&&UI.modal.type==="ordine"){if(Object.keys(gruppiOrdine()).filter(Boolean).length)renderModal();else closeModal()}},300)},
+  ordArr(d){openModal("ordArr",{id:d.id})},
+  async ordArrOk(d){const o=ORD().find(x=>x.id===d.id);if(!o)return;const q={};o.righe.forEach(r=>{const v=parseFloat(String(val("aq-"+r.iid)||"").replace(",","."));q[r.iid]=isFinite(v)?v:0});
+    const j=await api("ord.arrivato",{id:o.id,q});if(!j)return;
+    if(S.settings.moduli.haccp)openModal("hForm",{k:"merce",f:{conf:"si",forn:o.fn,prod:o.righe.map(r=>r.nome).join(", ").slice(0,80)}});else closeModal()},
+  async ordAnn(d){if(UI.pending!=="ordAnn"+d.id){UI.pending="ordAnn"+d.id;toast("Tocca di nuovo «Annulla» per confermare");setTimeout(()=>{if(UI.pending==="ordAnn"+d.id)UI.pending=null},4000);return}UI.pending=null;await api("ord.annulla",{id:d.id})},
+  ingEdit(d){openModal("ingEdit",{id:d.id})},
+  async ingEditOk(d){const n=v=>String(v||"").replace(",",".").trim();if(await api("mag.modifica",{iid:d.id,soglia:n(val("ie-s")),obj:n(val("ie-o")),forn:val("ie-f")}))closeModal()},
+  fornEdit(d){openModal("fornEdit",{id:d.id||""})},
+  async fornOk(d){const j=await api("forn.salva",{id:d.id||"",nome:val("fe-n"),tel:val("fe-t"),email:val("fe-e"),note:val("fe-note")});if(j)closeModal()},
+  fornTogli(){UI.modal.conf=true;renderModal()},
+  async fornTogliOk(d){if(await api("forn.togli",{id:d.id}))closeModal()},
+  etNuova(){openModal("etic",{})},
+  etDa(d){openModal("etic",{prep:d.id})},
+  etAll(d,e){const b=e.target.closest("[data-act]"),on=b.getAttribute("aria-pressed")!=="true";b.setAttribute("aria-pressed",on);b.style.cssText=on?"background:var(--accent);color:#fff;border-color:var(--accent)":""},
+  async etStampa(d){const all=[...document.querySelectorAll("#et-all [aria-pressed=true]")].map(b=>+b.dataset.v),fmt=val("et-f"),salta=val("et-s");UI.etFmt=fmt;
+    const dati={nome:val("et-n"),all,gg:val("et-gg"),ore:val("et-ore"),cons:val("et-c"),n:val("et-q"),note:val("et-note"),prep:d.prep||""};
+    const w=window.open("","_blank");if(!w){toast("Il browser ha bloccato la finestra: consenti i popup per Tavolo",true);return}w.document.write("<p style='font-family:sans-serif'>Preparo le etichette…</p>");
+    if($("et-save")&&$("et-save").checked)await api("prep.salva",{nome:dati.nome,all,gg:dati.gg,ore:dati.ore,cons:dati.cons});
+    const j=await api("etic.stampa",dati);if(!j||!j.nuovoId){w.close();return}
+    let e=null;for(let i=0;i<40&&!e;i++){e=ETIC().find(x=>x.id===j.nuovoId);if(!e)await new Promise(r=>setTimeout(r,100))}
+    if(!e){w.close();toast("Etichette registrate: ristampale da «In frigo adesso»",true);closeModal();return}
+    w.document.open();w.document.write(htmlEtichette(e,fmt,salta));w.document.close();closeModal();UI.hSez="etichette";render()},
+  etRistampa(d){const e=ETIC().find(x=>x.id===d.id);if(!e)return;const w=window.open("","_blank");if(!w){toast("Il browser ha bloccato la finestra: consenti i popup per Tavolo",true);return}w.document.open();w.document.write(htmlEtichette(Object.assign({},e,{n:1}),UI.etFmt||"a4",1));w.document.close()},
+  async etFine(d){await api("etic.esito",{id:d.id,esito:d.v})},
+  prepEdit(d){openModal("prepEdit",{id:d.id||""})},
+  async prepOk(d){const all=[...document.querySelectorAll("#et-all [aria-pressed=true]")].map(b=>+b.dataset.v);if(await api("prep.salva",{id:d.id||"",nome:val("pe-n"),all,gg:val("pe-gg"),ore:val("pe-ore"),cons:val("pe-c")}))closeModal()},
+  async prepTogli(d){if(await api("prep.togli",{id:d.id}))closeModal()},
   async addForn(){if(await api("forn.nuovo",{nome:val("fNome"),tel:val("fTel")})){pulisci("fNome","fTel");toast("Fornitore aggiunto")}},
   mov(d){openModal("mov",{tipo:d.v})},
   async movOk(){if(await api("cassa.mov",{tipo:UI.modal.tipo,importo:val("movI"),nota:val("movN")})){toast("Registrato");closeModal()}},
@@ -1968,6 +2074,9 @@ document.addEventListener("click",e=>{
   const f=ACT[d.act];if(f){try{const r=f(d,e);if(r&&r.catch)r.catch(err=>console.error(err))}catch(err){console.error(err);toast("Qualcosa è andato storto: riprova",true)}}
 });
 document.addEventListener("change",async e=>{const el=e.target,d=el.dataset;if(!S)return;
+  if(el.id==="et-n"){const n=el.value.trim().toLowerCase(),pr=(S.preparazioni||[]).find(x=>x.nome.toLowerCase()===n),mi=S.menu.find(x=>x.nome.toLowerCase()===n),all=pr?pr.all:mi?mi.all:null;
+    if(all){document.querySelectorAll("#et-all [data-v]").forEach(b=>{const on=all.includes(+b.dataset.v);b.setAttribute("aria-pressed",on);b.style.cssText=on?"background:var(--accent);color:#fff;border-color:var(--accent)":""})}
+    if(pr){$("et-gg").value=pr.gg;$("et-ore").value=pr.ore||0;$("et-c").value=pr.cons}return}
   if(d.price){const v=parseFloat(el.value);if(!(v>=0)){toast("Prezzo non valido",true);el.value=M(d.price).prezzo;return}if(v!==M(d.price).prezzo&&await api("menu.prezzo",{mid:d.price,prezzo:v}))toast("Prezzo aggiornato su tutti i tablet");return}
   if(d.posti){api("imp.tavolo.modifica",{tid:d.posti,posti:el.value});return}
   if(d.tavnome){api("imp.tavolo.modifica",{tid:d.tavnome,nome:el.value});return}

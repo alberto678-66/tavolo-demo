@@ -9,9 +9,9 @@
       return;
     }
   } catch (e) {}
-  var VERSIONE = "1.11.0-demo";
+  var VERSIONE = "1.12.0-demo";
   var ASS = { nome: "Alberto Malic · Tavolo", tel: "349 699 1941", email: "malicalberto604@gmail.com" };
-  var KEY = "tavolo-demo-v3", DURATA = 3 * 864e5;
+  var KEY = "tavolo-demo-v4", DURATA = 3 * 864e5;
 
   /* ---- piccolo sostituto di crypto/Buffer di Node, sufficiente per la demo ---- */
   var hex = function (a) { return Array.prototype.map.call(a, function (x) { return x.toString(16).padStart(2, "0"); }).join(""); };
@@ -209,6 +209,18 @@ function seedDemo(o) {
     { id: uid(), num: 3, stato: "bozza", creato: now - 864e5, da: staff[0].nome, nome: "Marco Caruso", tel: "333 555 0105", email: "", tipo: "Compleanno", titolo: "30 anni di Marco", data: g(16), ora: "21:00", oraFine: "", persone: 15, bambini: 0, sala: "Dehors",
       menu: ["Pizze a giro", "Fritti misti", "Bibite e birra"], prezzo: 20, prezzoBimbi: 0, extra: [{ desc: "Torta personalizzata", prezzo: 45 }], note: "", condizioni: cond, valido: 15, caparra: cap(100, 0) }];
   S.eventi.forEach(e => sincronizzaPrenEvento(S, e));
+  // etichette, scadenze e ordini ai fornitori (1.12)
+  ELENCHI_18.forEach(k => { if (!Array.isArray(S[k])) S[k] = []; });
+  S.settings.moduli.haccp = true; S.haccp = haccpBase(S); S.haccp.conf.resp = staff[0].nome;
+  ["f1", "f2", "f3", "f4", "f5"].forEach((id, i) => { const f = S.fornitori.find(x => x.id === id); if (f) { f.email = ["ordini@molinopastasud.example", "ordini@caseificioetna.example", "", "ordini@ortofruttacatania.example", "ordini@beveragesicilia.example"][i]; f.note = ["Consegna in 48 ore", "Consegna martedì e venerdì", "Ordinare entro le 18 per il giorno dopo", "Consegna ogni mattina", "Consegna il giovedì"][i]; } });
+  S.preparazioni = [["Ragù di carne", [9], 3, 0, "frigo"], ["Caponata", [9, 12], 4, 0, "frigo"], ["Pesto di pistacchio", [7, 8], 5, 0, "frigo"], ["Brodo di pesce", [4, 9, 14], 2, 0, "frigo"], ["Impasto pizza", [1], 2, 0, "frigo"], ["Crema di ricotta per cannoli", [7], 2, 0, "frigo"], ["Polpette crude", [1, 3, 7], 0, 18, "frigo"], ["Ragù di carne (porzioni)", [9], 90, 0, "congelatore"]]
+    .map(([nome, all, gg, ore, cons]) => ({ id: uid(), nome, all, gg, ore, cons, note: "" }));
+  const etic = (pi, oreFa) => { const x = S.preparazioni[pi], t = now - oreFa * 3600e3, h = x.gg * 24 + x.ore, g0 = dkey(t), prog = S.etichette.filter(e => e.g === g0).length + 1;
+    const e = { id: uid(), t, g: g0, nome: x.nome, all: x.all, scad: t + h * 3600e3, h, cons: x.cons, lotto: `L${g0.slice(2).replace(/-/g, "")}-${String(prog).padStart(2, "0")}`, n: 2, c: staff[3].nome, prep: x.id, note: "", stato: "in uso" };
+    S.etichette.push(e); S.haccpReg.push({ id: uid(), t, g: g0, k: "etic", c: staff[3].nome, eid: e.id, prod: e.nome, lotto: e.lotto, scad: e.scad, cons: e.cons, all: e.all, pz: 2, o: true, n: "" }); };
+  etic(4, 50); etic(3, 40); etic(1, 30); etic(0, 26); etic(2, 5); etic(5, 4);
+  S.etichette.sort((x, y) => x.t - y.t); S.haccpReg.sort((x, y) => x.t - y.t);
+  S.ordini.push({ id: uid(), t: now - 20 * 3600e3, forn: "f5", fn: "Beverage Sicilia", righe: [{ iid: "acqua", nome: "Acqua 75 cl", um: "bt", q: 48 }, { iid: "vino", nome: "Nero d'Avola", um: "bt", q: 12 }], via: "whatsapp", stato: "inviato", c: staff[0].nome });
   log(S, staff[0], "Dati di esempio caricati");
   return S;
 }
@@ -439,7 +451,15 @@ function formazioneInScadenza(S, ora) {
 }
 
 /* ---------- Dati nuovi (1.8) su locali creati con versioni precedenti ---------- */
-const ELENCHI_18 = ["clienti", "turni", "presenze", "attesa", "richiesteQr", "fatture", "intestatari", "haccpReg", "eventi"];
+const ELENCHI_18 = ["clienti", "turni", "presenze", "attesa", "richiesteQr", "fatture", "intestatari", "haccpReg", "eventi", "preparazioni", "etichette", "ordini"];
+/* ---------- Etichette e scadenze, ordini ai fornitori (1.12) ---------- */
+const CONSERVAZIONI = { frigo: "In frigorifero 0/+4 °C", congelatore: "In congelatore -18 °C", sottovuoto: "Sottovuoto, in frigorifero", ambiente: "A temperatura ambiente" };
+const allergeniOk = v => [...new Set((Array.isArray(v) ? v : []).map(Number).filter(a => a >= 1 && a <= 14))].sort((a, b) => a - b);
+const oreDurata = p => { const gg = numV(p.gg, 0, 730) || 0, ore = numV(p.ore, 0, 23) || 0; return Math.round(gg * 24 + ore); };
+// ingredienti sotto soglia che non sono già in un ordine mandato e non ancora arrivato
+const inOrdine = S => new Set(S.ordini.filter(o => o.stato === "inviato").flatMap(o => o.righe.map(r => r.iid)));
+const daOrdinare = S => { const g = inOrdine(S); return S.ing.filter(i => i.qta <= i.soglia && !g.has(i.id)); };
+const qtaSuggerita = i => { const obj = i.obj > i.soglia ? i.obj : i.soglia * 3; return r3(Math.max(obj - i.qta, i.soglia || 1)); };
 /* ---------- Eventi (1.11) ---------- */
 const TIPI_EVENTO = ["Compleanno", "Comunione", "Cresima", "Battesimo", "Matrimonio", "Laurea", "Cena aziendale", "Anniversario", "Festa privata", "Altro"];
 const STATI_EVENTO = { bozza: "bozza", inviato: "preventivo inviato", confermato: "confermato", svolto: "svolto", annullato: "annullato" };
@@ -462,6 +482,11 @@ function normalizza(S) {
   { const lim = Date.now() - 3 * 365 * 864e5; if (S.haccpReg.length && S.haccpReg[0].t < lim) S.haccpReg = S.haccpReg.filter(r => r.t >= lim); if (S.haccpReg.length > 40000) S.haccpReg = S.haccpReg.slice(-40000); }
   S.tavoli.forEach(t => { if (!t.consegna && !t.qrk) t.qrk = crypto.randomBytes(5).toString("hex"); });
   const ora = Date.now();
+  // etichette: restano 400 giorni; ordini: gli ultimi 500
+  if (S.etichette.length && S.etichette[0].t < ora - 400 * 864e5) S.etichette = S.etichette.filter(e => e.t >= ora - 400 * 864e5);
+  if (S.etichette.length > 5000) S.etichette = S.etichette.slice(-5000);
+  if (S.ordini.length > 500) S.ordini = S.ordini.slice(-500);
+  S.fornitori.forEach(f => { if (f.email == null) f.email = ""; if (f.note == null) f.note = ""; });
   // richieste dal QR: quelle in attesa scadono dopo 3 ore, lo storico resta 24 ore
   S.richiesteQr = S.richiesteQr.filter(r => ora - r.ora < 24 * 3600e3).slice(-300);
   S.richiesteQr.forEach(r => { if (r.stato === "attesa" && ora - r.ora > 3 * 3600e3) r.stato = "scaduto"; });
@@ -498,12 +523,17 @@ function testoRiepilogo(S, V, data) {
   if (top.length) r.push("", "Più venduti:", ...top.map(([n, q], i) => `${i + 1}. ${n} (${q})`));
   const ore = {}; V.forEach(v => { const h = new Date(v.ora).getHours(); ore[h] = (ore[h] || 0) + v.tot; });
   const hp = Object.entries(ore).sort((a, b) => b[1] - a[1])[0]; if (hp) r.push("", `Ora di punta: ${String(hp[0]).padStart(2, "0")}:00–${String(+hp[0] + 1).padStart(2, "0")}:00 (${eur(hp[1])})`);
-  if (S.settings.moduli.magazzino) { const low = S.ing.filter(g => g.qta <= g.soglia).map(g => g.nome); if (low.length) r.push("", "Da riordinare: " + low.slice(0, 12).join(", ") + (low.length > 12 ? "…" : "")); }
+  if (S.settings.moduli.magazzino) {
+    const low = daOrdinare(S); if (low.length) r.push("", "Da riordinare: " + low.slice(0, 12).map(g => g.nome).join(", ") + (low.length > 12 ? "…" : ""));
+    const forn = [...new Set(low.map(g => (S.fornitori.find(f => f.id === g.forn) || {}).nome).filter(Boolean))]; if (forn.length) r.push(`Ordini pronti da mandare: ${forn.join(", ")} (Magazzino → Ordini ai fornitori)`);
+  }
   if (S.settings.moduli.prenotazioni) { const dom = dkey(new Date(data + "T12:00").getTime() + 864e5), pr = S.prenotazioni.filter(p => p.data === dom && p.stato === "attesa"); r.push("", pr.length ? `Prenotazioni domani: ${pr.length} (${pr.reduce((s, p) => s + (+p.persone || 0), 0)} persone)` : "Nessuna prenotazione per domani"); }
   if (S.settings.moduli.clienti) { const n = new Set(V.map(v => v.cliente).filter(Boolean)).size; if (n) r.push(`Clienti abituali passati oggi: ${n}`); }
   if (S.settings.moduli.haccp && S.haccp) {
     const reg = S.haccpReg.filter(x => x.g === data && !x.x), nc = reg.filter(x => !x.o).length, manc = haccpMancanti(S, Math.min(Date.now(), new Date(data + "T23:59").getTime())).length;
     r.push("", `HACCP: ${reg.filter(x => x.k === "temp").length} temperature registrate${manc ? ` · *${manc} controlli mancanti*` : ""}${nc ? ` · *${nc} non conformità*` : ""}`);
+    const fine = new Date(data + "T23:59").getTime(), scad = S.etichette.filter(e => e.stato === "in uso" && e.scad <= fine + 864e5);
+    if (scad.length) r.push(`Preparazioni in scadenza entro domani: ${scad.length} (${scad.slice(0, 6).map(e => e.nome).join(", ")}${scad.length > 6 ? "…" : ""})`);
   }
   r.push("", "_Inviato da Tavolo_");
   return r.join("\n");
@@ -736,8 +766,68 @@ const AZIONI = {
   "mag.carico": ["admin", (S, p, u) => { const g = ING(S, p.iid) || no("Ingrediente non trovato"), q = num(p.q, 0.001); if (q == null) no("Scrivi la quantità arrivata"); g.qta = r3(g.qta + q); const c = num(p.costo, 0); if (c != null && p.costo !== "") g.costo = c; log(S, u, `Carico ${q} ${g.um} ${g.nome}`); }],
   "mag.conta": ["admin", (S, p, u) => { const g = ING(S, p.iid) || no("Ingrediente non trovato"), q = num(p.q, 0); if (q == null) no("Quantità non valida"); const d = r3(q - g.qta); g.qta = r3(q); log(S, u, `Inventario ${g.nome}: ${d >= 0 ? "+" : ""}${d} ${g.um}`); }],
   "mag.nuovo": ["admin", (S, p) => { const nome = txt(p.nome, 50); if (!nome) no("Scrivi il nome"); S.ing.push({ id: uid(), nome, um: ["kg", "l", "pz", "bt"].includes(p.um) ? p.um : "kg", qta: num(p.qta, 0) || 0, soglia: num(p.soglia, 0) || 0, costo: num(p.costo, 0) || 0, forn: p.forn || "" }); }],
-  "mag.modifica": ["admin", (S, p) => { const g = ING(S, p.iid) || no("Ingrediente non trovato"); const s = num(p.soglia, 0); if (s != null) g.soglia = s; if (p.forn != null) g.forn = String(p.forn); }],
-  "forn.nuovo": ["admin", (S, p) => { const n = txt(p.nome, 50); if (!n) no("Scrivi il nome del fornitore"); S.fornitori.push({ id: uid(), nome: n, tel: txt(p.tel, 30) }); }],
+  "mag.modifica": ["admin", (S, p) => {
+    const g = ING(S, p.iid) || no("Ingrediente non trovato"); const s = numV(p.soglia, 0); if (s != null) g.soglia = s;
+    if (p.obj !== undefined) { const o = numV(p.obj, 0); g.obj = o == null ? 0 : o; }
+    if (p.forn != null) { const f = String(p.forn); if (f && !S.fornitori.some(x => x.id === f)) no("Fornitore non trovato"); g.forn = f; }
+  }],
+  "forn.nuovo": ["admin", (S, p) => { const n = txt(p.nome, 50); if (!n) no("Scrivi il nome del fornitore"); S.fornitori.push({ id: uid(), nome: n, tel: txt(p.tel, 30), email: "", note: "" }); }],
+  "forn.salva": ["admin", (S, p, u, out) => {
+    const nome = txt(p.nome, 50) || no("Scrivi il nome del fornitore"), tel = txt(p.tel, 30), email = txt(p.email, 80).toLowerCase(), note = txt(p.note, 120);
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) no("Email del fornitore non valida");
+    if (p.id) { const f = S.fornitori.find(x => x.id === p.id) || no("Fornitore non trovato"); Object.assign(f, { nome, tel, email, note }); out.nuovoId = f.id; }
+    else { if (S.fornitori.length >= 100) no("Troppi fornitori"); const f = { id: uid(), nome, tel, email, note }; S.fornitori.push(f); out.nuovoId = f.id; }
+    out.msg = "Fornitore salvato";
+  }],
+  "forn.togli": ["admin", (S, p, u) => {
+    const f = S.fornitori.find(x => x.id === p.id) || no("Fornitore non trovato");
+    S.fornitori = S.fornitori.filter(x => x !== f); S.ing.forEach(i => { if (i.forn === f.id) i.forn = ""; }); log(S, u, `Tolto il fornitore ${f.nome}`);
+  }],
+  "ord.inviato": ["cassa", (S, p, u, out) => {
+    if (!S.settings.moduli.magazzino) no("Il magazzino è spento");
+    const f = S.fornitori.find(x => x.id === p.forn) || no("Scegli il fornitore"), via = ["whatsapp", "email", "copia"].includes(p.via) ? p.via : "copia";
+    const righe = (Array.isArray(p.righe) ? p.righe : []).map(r => { const g = ING(S, r.iid); const q = numV(r.q, 0, 1e5); return g && q ? { iid: g.id, nome: g.nome, um: g.um, q: r3(q) } : null; }).filter(Boolean);
+    if (!righe.length) no("Metti almeno una quantità");
+    const o = { id: uid(), t: Date.now(), forn: f.id, fn: f.nome, righe, via, stato: "inviato", c: u.nome }; S.ordini.push(o); out.nuovoId = o.id;
+    log(S, u, `Ordine a ${f.nome}: ${righe.length} prodotti (${via})`); out.msg = `Ordine a ${f.nome} segnato come mandato`;
+  }],
+  "ord.arrivato": ["cassa", (S, p, u, out) => {
+    const o = S.ordini.find(x => x.id === p.id) || no("Ordine non trovato"); if (o.stato !== "inviato") no("Questo ordine è già chiuso");
+    const q = p.q && typeof p.q === "object" ? p.q : {};
+    o.righe.forEach(r => { const g = ING(S, r.iid); const v = q[r.iid] === undefined ? r.q : numV(q[r.iid], 0, 1e5); r.arr = v == null ? 0 : r3(v); if (g && r.arr) g.qta = r3(g.qta + r.arr); });
+    o.stato = "arrivato"; o.arr = Date.now(); o.ca = u.nome; log(S, u, `Arrivato l'ordine di ${o.fn}: carico in magazzino`); out.msg = "Merce caricata in magazzino";
+  }],
+  "ord.annulla": ["cassa", (S, p, u) => {
+    const o = S.ordini.find(x => x.id === p.id) || no("Ordine non trovato"); if (o.stato !== "inviato") no("Questo ordine è già chiuso");
+    o.stato = "annullato"; o.ann = Date.now(); log(S, u, `Annullato l'ordine a ${o.fn}`);
+  }],
+  /* ----- Etichette e scadenze (1.12) ----- */
+  "prep.salva": ["disp", (S, p, u, out) => {
+    const nome = txt(p.nome, 60) || no("Scrivi il nome della preparazione"), h = oreDurata(p);
+    if (!h) no("Scrivi quanto dura: giorni e/o ore"); const cons = CONSERVAZIONI[p.cons] ? p.cons : "frigo";
+    const d = { nome, all: allergeniOk(p.all), gg: Math.floor(h / 24), ore: h % 24, cons, note: txt(p.note, 80) };
+    if (p.id) { const x = S.preparazioni.find(y => y.id === p.id) || no("Preparazione non trovata"); Object.assign(x, d); out.nuovoId = x.id; }
+    else { if (S.preparazioni.length >= 300) no("Troppe preparazioni salvate"); const x = Object.assign({ id: uid() }, d); S.preparazioni.push(x); out.nuovoId = x.id; }
+    out.msg = `${nome}: preparazione salvata`;
+  }],
+  "prep.togli": ["disp", (S, p) => { S.preparazioni = S.preparazioni.filter(x => x.id !== p.id); }],
+  "etic.stampa": ["tutti", (S, p, u, out) => {
+    if (!S.settings.moduli.haccp) no("Il modulo HACCP è spento");
+    const nome = txt(p.nome, 60) || no("Scrivi cosa c'è nella vaschetta"), h = oreDurata(p);
+    if (!h) no("Scrivi quanto dura: giorni e/o ore"); const cons = CONSERVAZIONI[p.cons] ? p.cons : "frigo";
+    const n = Math.round(numV(p.n, 1, 48) || 0) || no("Quante etichette? Da 1 a 48");
+    const t = Date.now(), g = dkey(t), prog = S.etichette.filter(e => e.g === g).length + 1;
+    const e = { id: uid(), t, g, nome, all: allergeniOk(p.all), scad: t + h * 3600e3, h, cons, lotto: `L${g.slice(2).replace(/-/g, "")}-${String(prog).padStart(2, "0")}`, n, c: u.nome, prep: txt(p.prep, 20), note: txt(p.note, 80), stato: "in uso" };
+    S.etichette.push(e);
+    registra(S, u, "etic", { eid: e.id, prod: nome, lotto: e.lotto, scad: e.scad, cons, all: e.all, pz: n, o: true, n: e.note });
+    out.nuovoId = e.id; out.msg = `${n} etichett${n === 1 ? "a" : "e"} per ${nome} · lotto ${e.lotto}`;
+  }],
+  "etic.esito": ["tutti", (S, p, u, out) => {
+    const e = S.etichette.find(x => x.id === p.id) || no("Etichetta non trovata"); if (e.stato !== "in uso") no("Già segnata");
+    const es = p.esito === "buttata" ? "buttata" : "usata"; e.stato = es; e.fine = { t: Date.now(), c: u.nome };
+    if (es === "buttata") registra(S, u, "smalt", { eid: e.id, prod: e.nome, lotto: e.lotto, scad: e.scad, o: true, n: e.scad < Date.now() ? "Scaduta: tolta dal frigo ed eliminata" : txt(p.n, 120) || "Eliminata" });
+    out.msg = es === "buttata" ? `${e.nome}: eliminata e registrata` : `${e.nome}: finita`;
+  }],
 
   "cassa.mov": ["cassa", (S, p, u) => {
     const tipo = ["fondo", "prelievo", "versamento"].includes(p.tipo) ? p.tipo : no("Tipo non valido"), v = num(p.importo, 0.01, 1e6); if (v == null) no("Scrivi un importo");
@@ -1225,7 +1315,7 @@ function validaBackup(o) {
     && o.staff.some(s => s.ruolo === "titolare" && s.pinHash);
 }
 
-module.exports = { TIPI_EVENTO, STATI_EVENTO, METODI_EVENTO, COND_EVENTO, totaleEvento, haccpMancanti, formazioneInScadenza, TIPI_ATTR, FREQ, AZIONI_CORR, pivaOk, cfOk, calcolaFattura, righeDaVendita, xmlFattura, nomeFileFattura, nomeCliente, fiscCompleti, REGIMI, ALIQUOTE, FORFETTARI, SOGLIA_BOLLO, latino, normalizza, testoRiepilogo, telNorm, puntiConf, LINGUE, posGriglia, piattaforme, PIATTAFORME_BASE, giorno, ORA_CAMBIO_GIORNO, prezzoRiga, REPARTI, RUOLI, METODI, ALLERGENI, ALLERGENI_EN, AZIONI, ACCESSO, applica, creaStato, presetMenu, statoPubblico, verificaPin, hashPin, validaBackup, testoComanda, testoPreconto, testoAvviso, dkey, eur, round2, uid };
+module.exports = { CONSERVAZIONI, daOrdinare, qtaSuggerita, inOrdine, TIPI_EVENTO, STATI_EVENTO, METODI_EVENTO, COND_EVENTO, totaleEvento, haccpMancanti, formazioneInScadenza, TIPI_ATTR, FREQ, AZIONI_CORR, pivaOk, cfOk, calcolaFattura, righeDaVendita, xmlFattura, nomeFileFattura, nomeCliente, fiscCompleti, REGIMI, ALIQUOTE, FORFETTARI, SOGLIA_BOLLO, latino, normalizza, testoRiepilogo, telNorm, puntiConf, LINGUE, posGriglia, piattaforme, PIATTAFORME_BASE, giorno, ORA_CAMBIO_GIORNO, prezzoRiga, REPARTI, RUOLI, METODI, ALLERGENI, ALLERGENI_EN, AZIONI, ACCESSO, applica, creaStato, presetMenu, statoPubblico, verificaPin, hashPin, validaBackup, testoComanda, testoPreconto, testoAvviso, dkey, eur, round2, uid };
 
 })(require, module, Buffer);
   var L = module.exports;
