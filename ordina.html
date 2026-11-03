@@ -140,5 +140,6 @@ document.addEventListener("click",async e=>{
 $("lang").addEventListener("change",e=>{lang=e.target.value;store.set("tavolo-ordina-lingua",lang);disegna()});
 carica();setInterval(()=>{if(!$("sh").innerHTML&&!document.hidden)carica()},15000);
 </script>
+<script src="consenso.js" defer></script>
 </body>
 </html>

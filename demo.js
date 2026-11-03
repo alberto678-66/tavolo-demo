@@ -9,9 +9,9 @@
       return;
     }
   } catch (e) {}
-  var VERSIONE = "1.12.0-demo";
+  var VERSIONE = "1.14.1-demo";
   var ASS = { nome: "Alberto Malic · Tavolo", tel: "349 699 1941", email: "malicalberto604@gmail.com" };
-  var KEY = "tavolo-demo-v4", DURATA = 3 * 864e5;
+  var KEY = "tavolo-demo-v5", DURATA = 3 * 864e5;
 
   /* ---- piccolo sostituto di crypto/Buffer di Node, sufficiente per la demo ---- */
   var hex = function (a) { return Array.prototype.map.call(a, function (x) { return x.toString(16).padStart(2, "0"); }).join(""); };
@@ -66,6 +66,11 @@ function verificaPin(p, pin) {
   try { return crypto.timingSafeEqual(crypto.scryptSync(String(pin), p.salt, 32), Buffer.from(p.pinHash, "hex")); } catch (e) { return false; }
 }
 const pinValido = pin => /^\d{4}$/.test(String(pin));
+// PIN facili da indovinare: cifre tutte uguali, scale (1234, 9876), 1212, anni recenti
+const pinFacile = pin => { const p = String(pin); if (!/^\d{4}$/.test(p)) return false; const d = [...p].map(Number);
+  if (d.every(x => x === d[0])) return true; if (d.every((x, i) => !i || x === d[i - 1] + 1) || d.every((x, i) => !i || x === d[i - 1] - 1)) return true;
+  if (p.slice(0, 2) === p.slice(2)) return true; if (/^(19[5-9]\d|20[0-3]\d)$/.test(p)) return true; return false; };
+const PIN_FACILE = "PIN troppo facile da indovinare (es. 1234, 0000, 1212 o un anno): scegline un altro";
 
 /* ---------- Calcoli ---------- */
 const T = (S, id) => S.tavoli.find(x => x.id === id);
@@ -124,6 +129,7 @@ function base(x) {
 function creaStato(o) {
   if (!pinValido(o.pin)) no("Il PIN del titolare deve avere 4 cifre");
   if (o.demo) return seedDemo(o);
+  if (pinFacile(o.pin)) no(PIN_FACILE);
   const modello = ["bar", "pizzeria", "trattoria"].includes(o.modello) ? o.modello : "trattoria";
   const pm = presetMenu(modello); pm.menu.forEach(m => m.ing = []);
   const tav = [];
@@ -451,7 +457,7 @@ function formazioneInScadenza(S, ora) {
 }
 
 /* ---------- Dati nuovi (1.8) su locali creati con versioni precedenti ---------- */
-const ELENCHI_18 = ["clienti", "turni", "presenze", "attesa", "richiesteQr", "fatture", "intestatari", "haccpReg", "eventi", "preparazioni", "etichette", "ordini"];
+const ELENCHI_18 = ["consensi", "clienti", "turni", "presenze", "attesa", "richiesteQr", "fatture", "intestatari", "haccpReg", "eventi", "preparazioni", "etichette", "ordini"];
 /* ---------- Etichette e scadenze, ordini ai fornitori (1.12) ---------- */
 const CONSERVAZIONI = { frigo: "In frigorifero 0/+4 °C", congelatore: "In congelatore -18 °C", sottovuoto: "Sottovuoto, in frigorifero", ambiente: "A temperatura ambiente" };
 const allergeniOk = v => [...new Set((Array.isArray(v) ? v : []).map(Number).filter(a => a >= 1 && a <= 14))].sort((a, b) => a - b);
@@ -718,10 +724,16 @@ const AZIONI = {
     const nome = txt(p.nome, 50), pers = num(p.persone, 1, 200);
     if (!nome || !/^\d{4}-\d{2}-\d{2}$/.test(p.data) || !/^\d{2}:\d{2}$/.test(p.ora) || !pers) no("Servono nome, giorno, ora e numero di persone");
     if (p.tavolo && !T(S, p.tavolo)) no("Tavolo non trovato");
-    S.prenotazioni.push({ id: uid(), data: p.data, ora: p.ora, nome, tel: txt(p.tel, 30), persone: Math.round(pers), tavolo: p.tavolo || "", note: txt(p.note, 160), stato: "attesa", da: u.nome, acc: !!p.acc });
+    // informativa data al cliente (obbligatoria) e consenso esplicito per allergie e accessibilità (dati sulla salute, art. 9 GDPR)
+    if (p.privacy !== true) no("Spunta la casella dell'informativa privacy data al cliente");
+    if ((txt(p.note, 160) || p.acc) && p.salute !== true) no("Hai scritto note o accessibilità: serve il consenso esplicito del cliente per questi dati, oppure toglile");
+    S.prenotazioni.push({ id: uid(), data: p.data, ora: p.ora, nome, tel: txt(p.tel, 30), persone: Math.round(pers), tavolo: p.tavolo || "", note: txt(p.note, 160), stato: "attesa", da: u.nome, acc: !!p.acc,
+      cons: { privacy: "informativa data da " + u.nome, salute: p.salute === true, ora: Date.now() } });
     log(S, u, `Prenotazione ${nome}, ${pers} pers. ${p.data} ${p.ora}`);
   }],
   "pren.stato": ["pren", (S, p, u) => { const pr = S.prenotazioni.find(x => x.id === p.pid) || no("Prenotazione non trovata"); pr.stato = p.stato === "annullata" ? "annullata" : "attesa"; if (pr.stato === "annullata") log(S, u, `Prenotazione annullata: ${pr.nome}`); }],
+  "pren.conf": ["pren", (S, p, u) => { const pr = S.prenotazioni.find(x => x.id === p.pid) || no("Prenotazione non trovata"); if (pr.stato !== "attesa") no("La prenotazione non è più in attesa"); pr.conf = p.conf === "confermata" ? "confermata" : "attesa"; pr.confDa = pr.conf === "confermata" ? u.nome : ""; pr.confOra = Date.now(); log(S, u, `Prenotazione ${pr.nome}: ${pr.conf === "confermata" ? "confermata a voce" : "conferma tolta"}`); }],
+  "pren.avvisato": ["pren", (S, p, u) => { const pr = S.prenotazioni.find(x => x.id === p.pid) || no("Prenotazione non trovata"); pr.avvisato = Date.now(); }],
   "pren.arrivo": ["pren", (S, p, u) => {
     const pr = S.prenotazioni.find(x => x.id === p.pid) || no("Prenotazione non trovata"), t = getT(S, p.tid);
     if (isBusy(t)) no("Il tavolo è occupato"); if (!t.posti) no("Scegli un tavolo con posti");
@@ -893,11 +905,17 @@ const AZIONI = {
     const tel = txt(p.tel, 20), tn = telNorm(tel);
     let c = p.id ? CLI(S, p.id) || no("Cliente non trovato") : null;
     if (!c) {
-      if (!p.consenso) no("Serve il consenso del cliente per salvare i suoi dati");
+      if (p.consenso !== true) no("Serve il consenso del cliente per salvare i suoi dati");
       if (tn && S.clienti.some(x => telNorm(x.tel) === tn)) no("C'è già un cliente con questo numero");
-      c = { id: uid(), creato: Date.now(), consenso: Date.now(), punti: 0, visite: 0, spesa: 0, piatti: {} }; S.clienti.push(c);
+      c = { id: uid(), creato: Date.now(), consenso: Date.now(), consensoDa: u.nome, punti: 0, visite: 0, spesa: 0, piatti: {} }; S.clienti.push(c);
       log(S, u, `Nuovo cliente abituale: ${nome}`);
     } else if (tn && S.clienti.some(x => x !== c && telNorm(x.tel) === tn)) no("C'è già un cliente con questo numero");
+    // auguri e messaggi del locale: consenso a parte, facoltativo e revocabile. Senza, il compleanno non si salva.
+    if (p.consensoMsg != null) c.consensoMsg = p.consensoMsg === true ? (c.consensoMsg || Date.now()) : 0;
+    if (comp && !c.consensoMsg) no("Per salvare il compleanno serve il consenso del cliente agli auguri e ai messaggi del locale");
+    // allergie e intolleranze sono dati sulla salute (art. 9 GDPR): solo con il consenso esplicito a parte
+    if (p.consensoSalute != null) c.consensoSalute = p.consensoSalute === true ? (c.consensoSalute || Date.now()) : 0;
+    if (!c.consensoSalute && /allerg|intoller|celiac|glutine|lattosio|nichel|anafilass|diabet|favismo/i.test(String(p.note || ""))) no("Le note parlano di allergie o intolleranze: spunta il consenso esplicito del cliente per questi dati, oppure toglile");
     Object.assign(c, { nome, tel, compleanno: comp, note: txt(p.note, 160), email: txt(p.email, 80) });
     if (p.tid) { const t = getT(S, p.tid); t.cliente = c.id; }
     out.nuovoId = c.id;
@@ -1021,8 +1039,10 @@ const AZIONI = {
     const ts = S.tavoli.filter(t => t.sala === p.sala && !t.consegna).sort((a, b) => a.nome.localeCompare(b.nome, "it", { numeric: true }));
     posGriglia(ts).forEach((q, i) => { ts[i].x = q.x; ts[i].y = q.y; });
   }],
-  "imp.staff.nuovo": ["admin", (S, p, u) => {
-    const nome = txt(p.nome, 30); if (!nome) no("Scrivi il nome"); if (!RUOLI[p.ruolo]) no("Ruolo non valido"); if (!pinValido(p.pin)) no("Il PIN deve avere 4 cifre");
+  "imp.staff.nuovo": ["admin", (S, p, u, out, ctx) => {
+    // limite di account della licenza (firmato da Alberto): il server lo passa in ctx.maxAccount
+    if (ctx && ctx.maxAccount && S.staff.length >= ctx.maxAccount) no(`La licenza comprende ${ctx.maxAccount} account e sono già tutti usati: togli qualcuno dallo staff o chiedi all'assistenza un piano più grande`);
+    const nome = txt(p.nome, 30); if (!nome) no("Scrivi il nome"); if (!RUOLI[p.ruolo]) no("Ruolo non valido"); if (!pinValido(p.pin)) no("Il PIN deve avere 4 cifre"); if (pinFacile(p.pin)) no(PIN_FACILE);
     if (S.staff.some(x => verificaPin(x, p.pin))) no("PIN già usato da un'altra persona");
     S.staff.push({ id: uid(), nome, ruolo: p.ruolo, ...hashPin(p.pin) }); log(S, u, `Nuova persona nello staff: ${nome} (${RUOLI[p.ruolo]})`);
   }],
@@ -1030,7 +1050,7 @@ const AZIONI = {
     const x = S.staff.find(s => s.id === p.id) || no("Persona non trovata");
     if (p.nome != null) x.nome = txt(p.nome, 30) || x.nome;
     if (p.ruolo != null) { if (!RUOLI[p.ruolo]) no("Ruolo non valido"); if (x.ruolo === "titolare" && p.ruolo !== "titolare" && S.staff.filter(s => s.ruolo === "titolare").length < 2) no("Serve almeno un titolare"); if (x.ruolo !== p.ruolo) out.revoca = x.id; x.ruolo = p.ruolo; }
-    if (p.pin != null) { if (!pinValido(p.pin)) no("Il PIN deve avere 4 cifre"); if (S.staff.some(s => s !== x && verificaPin(s, p.pin))) no("PIN già usato da un'altra persona"); Object.assign(x, hashPin(p.pin)); out.revoca = x.id; log(S, u, `PIN cambiato per ${x.nome}`); }
+    if (p.pin != null) { if (!pinValido(p.pin)) no("Il PIN deve avere 4 cifre"); if (pinFacile(p.pin)) no(PIN_FACILE); if (S.staff.some(s => s !== x && verificaPin(s, p.pin))) no("PIN già usato da un'altra persona"); Object.assign(x, hashPin(p.pin)); out.revoca = x.id; log(S, u, `PIN cambiato per ${x.nome}`); }
     if (out.revoca === u.id) out.revoca = null;
   }],
   "imp.staff.elimina": ["admin", (S, p, u, out) => {
@@ -1043,7 +1063,9 @@ const AZIONI = {
     if (w && w.replace(/\D/g, "").length < 8) no("Numero WhatsApp del locale non valido");
     if (orari && !/^(\d{2}:\d{2}-\d{2}:\d{2})(,\d{2}:\d{2}-\d{2}:\d{2})*$/.test(orari)) no("Orari non chiari: scrivi per esempio 12:30-14:30, 19:30-23:00");
     const chiuso = [...new Set((Array.isArray(p.chiuso) ? p.chiuso : []).map(Number).filter(d => d >= 0 && d <= 6))];
-    S.settings.prenOnline = { whatsapp: w, orari: orari || "12:30-14:30,19:30-23:00", chiuso, max: Math.round(num(p.max, 1, 50) || 10), pagina: /^https?:\/\/\S+$/.test(p.pagina || "") ? p.pagina : "" };
+    S.settings.prenOnline = { whatsapp: w, orari: orari || "12:30-14:30,19:30-23:00", chiuso, max: Math.round(num(p.max, 1, 50) || 10), pagina: /^https?:\/\/\S+$/.test(p.pagina || "") ? p.pagina : "", indirizzo: /^https:\/\/[\w.-]+(:\d+)?\/?$/.test(String(p.indirizzo || "").trim()) ? String(p.indirizzo).trim().replace(/\/+$/, "") : "", diretta: p.diretta !== false, promemoria: p.promemoria !== false };
+    if (p.indirizzo && !/^https:\/\/[\w.-]+(:\d+)?\/?$/.test(String(p.indirizzo).trim())) no("Indirizzo internet non valido: scrivi per esempio https://nomelocale.tuodominio.it");
+    if (p.diretta === false && !w) no("Per ricevere le prenotazioni su WhatsApp scrivi il numero del locale");
     log(S, u, "Prenotazioni online aggiornate");
   }],
   "imp.rt": ["tecnico", (S, p, u) => {
@@ -1306,7 +1328,7 @@ function posGriglia(ts) {
 function statoPubblico(S) {
   const c = Object.assign({}, S);
   c.staff = S.staff.map(({ id, nome, ruolo }) => ({ id, nome, ruolo }));
-  delete c.licenza; delete c.sblocco; delete c.trChiave; delete c.aiChiave; delete c.tecnico; delete c.sbloccoTec;
+  delete c.consensi; delete c.licenza; delete c.sblocco; delete c.trChiave; delete c.aiChiave; delete c.tecnico; delete c.sbloccoTec; delete c.fb;
   return c;
 }
 
@@ -1315,10 +1337,20 @@ function validaBackup(o) {
     && o.staff.some(s => s.ruolo === "titolare" && s.pinHash);
 }
 
-module.exports = { CONSERVAZIONI, daOrdinare, qtaSuggerita, inOrdine, TIPI_EVENTO, STATI_EVENTO, METODI_EVENTO, COND_EVENTO, totaleEvento, haccpMancanti, formazioneInScadenza, TIPI_ATTR, FREQ, AZIONI_CORR, pivaOk, cfOk, calcolaFattura, righeDaVendita, xmlFattura, nomeFileFattura, nomeCliente, fiscCompleti, REGIMI, ALIQUOTE, FORFETTARI, SOGLIA_BOLLO, latino, normalizza, testoRiepilogo, telNorm, puntiConf, LINGUE, posGriglia, piattaforme, PIATTAFORME_BASE, giorno, ORA_CAMBIO_GIORNO, prezzoRiga, REPARTI, RUOLI, METODI, ALLERGENI, ALLERGENI_EN, AZIONI, ACCESSO, applica, creaStato, presetMenu, statoPubblico, verificaPin, hashPin, validaBackup, testoComanda, testoPreconto, testoAvviso, dkey, eur, round2, uid };
+module.exports = { CONSERVAZIONI, daOrdinare, qtaSuggerita, inOrdine, TIPI_EVENTO, STATI_EVENTO, METODI_EVENTO, COND_EVENTO, totaleEvento, haccpMancanti, formazioneInScadenza, TIPI_ATTR, FREQ, AZIONI_CORR, pivaOk, cfOk, calcolaFattura, righeDaVendita, xmlFattura, nomeFileFattura, nomeCliente, fiscCompleti, REGIMI, ALIQUOTE, FORFETTARI, SOGLIA_BOLLO, latino, normalizza, testoRiepilogo, telNorm, puntiConf, LINGUE, posGriglia, piattaforme, PIATTAFORME_BASE, giorno, ORA_CAMBIO_GIORNO, prezzoRiga, REPARTI, RUOLI, METODI, ALLERGENI, ALLERGENI_EN, AZIONI, ACCESSO, applica, creaStato, presetMenu, statoPubblico, verificaPin, hashPin, pinFacile, validaBackup, testoComanda, testoPreconto, testoAvviso, dkey, eur, round2, uid };
 
 })(require, module, Buffer);
   var L = module.exports;
+
+  /* ---- documenti da accettare (come nel locale) ---- */
+  var DOCUMENTI = {
+    termini: { v: "2026-11-01", titolo: "Condizioni di licenza d'uso di Tavolo", pagina: "/termini.html", chi: "titolare" },
+    vessatorie: { v: "2026-11-01", titolo: "Approvazione specifica delle clausole (artt. 1341 e 1342 del Codice civile)", pagina: "/termini.html#vessatorie", chi: "titolare" },
+    nomina: { v: "2026-11-01", titolo: "Accordo sul trattamento dei dati personali (art. 28 GDPR)", pagina: "/nomina.html", chi: "titolare" },
+    privacy: { v: "2026-11-01", titolo: "Informativa privacy per chi usa Tavolo", pagina: "/privacy.html", chi: "tutti" },
+    cookie: { v: "2026-11-01", titolo: "Cookie e dati salvati sul dispositivo", pagina: "/cookie.html", chi: "tutti" }
+  };
+  function daAccettare(u) { return []; } // nella demo i documenti risultano già accettati
 
   /* ---- stato salvato sul dispositivo ---- */
   var mem = null;
@@ -1331,6 +1363,8 @@ module.exports = { CONSERVAZIONI, daOrdinare, qtaSuggerita, inOrdine, TIPI_EVENT
     // dati fiscali d'esempio (inventati), così nella demo si possono provare le fatture
     if (!S.settings.fisc) S.settings.fisc = { den: "Trattoria Da Melo (esempio)", piva: "01234567897", cf: "", regime: "RF01", ind: "Via Etnea", civ: "1", cap: "95100", com: "Catania", prov: "CT", naz: "IT", tel: "", email: "", iban: "", reaUff: "", reaNum: "", bolloCliente: false, suffisso: "" };
     if (S.haccp && S.haccp.conf && !S.haccp.conf.resp) S.haccp.conf.resp = "Melo (titolare)";
+    S.consensi = [];
+    S.staff.forEach(function (x, n) { Object.keys(DOCUMENTI).forEach(function (k) { var dd = DOCUMENTI[k]; if (dd.chi === "tutti" || x.ruolo === "titolare") S.consensi.push({ id: randomBytes(6).toString("hex"), sid: x.id, nome: x.nome, ruolo: x.ruolo, doc: k, v: dd.v, titolo: dd.titolo, ora: Date.now() - (n + 1) * 864e5, ip: "demo", modo: "accesso a Tavolo" }); }); });
     return { creato: Date.now(), S: S, sessioni: {}, mesi: [] };
   }
   var D = leggi();
@@ -1340,7 +1374,7 @@ module.exports = { CONSERVAZIONI, daOrdinare, qtaSuggerita, inOrdine, TIPI_EVENT
   /* ---- licenza di prova: tutte le funzioni attive ---- */
   function lic() {
     var scad = D.creato + DURATA;
-    return { tipo: "licenza", stato: "valida", scadenza: L.dkey(Date.now() + 365 * 864e5), giorni: 365, intestatario: "Demo", piano: "pro", assistenza: ASS, bloccata: false };
+    return { tipo: "licenza", stato: "valida", scadenza: L.dkey(Date.now() + 365 * 864e5), giorni: 365, intestatario: "Demo", piano: "pro", assistenza: ASS, bloccata: false, account: { usati: D.S.staff.length, max: 25, superato: false } };
   }
   function base() { var u = location.href.split("#")[0].split("?")[0]; return u.slice(0, u.lastIndexOf("/")); }
 
@@ -1351,7 +1385,7 @@ module.exports = { CONSERVAZIONI, daOrdinare, qtaSuggerita, inOrdine, TIPI_EVENT
     var u = utente(c.t); if (!u) { c.emit("esci", {}); return; }
     var dati = Object.assign(L.statoPubblico(D.S), { io: u.id, meta: { versione: VERSIONE, origine: "demo", licenza: lic(), ora: Date.now(), giorno: L.giorno(Date.now()),
       aggiornamento: { configurato: false, auto: true }, traduzione: { servizio: "mymemory", chiave: false }, ai: { chiave: false, usate: 0, modelloPredefinito: "" },
-      paginaPrenota: "", copiaEsterna: { docker: false, cartella: "", ora: null, file: null, errore: null } } });
+      paginaPrenota: "", paginaLocale: "", linkDiretto: "", tecnico: false, tecnicoAttivo: false, internet: { attivo: false, stato: "", errore: null, ultimo: null }, copiaEsterna: { docker: false, cartella: "", ora: null, file: null, errore: null } } });
     if (u.ruolo === "cucina") dati.clienti = [];
     { var limH = L.dkey(Date.now() - 10 * 864e5); dati.haccpReg = (D.S.haccpReg || []).filter(function (r) { return r.g >= limH; }); }
     if (["titolare", "cassa"].indexOf(u.ruolo) < 0) { dati.fatture = []; dati.intestatari = []; }
@@ -1387,6 +1421,7 @@ module.exports = { CONSERVAZIONI, daOrdinare, qtaSuggerita, inOrdine, TIPI_EVENT
     var S = D.S;
 
     if (p === "/api/info") return json(200, { configurato: true, demo: true, versione: VERSIONE, nome: S.settings.nome, accent: S.settings.accent, indirizzi: [base()], licenza: lic(), assistenza: ASS });
+    if (p === "/api/documenti") { var f0 = S.settings.fisc || {}; return json(200, { locale: { nome: S.settings.nome, citta: S.settings.citta || "", den: f0.den || "", piva: f0.piva || "", cf: f0.cf || "", ind: f0.ind || "", cap: f0.cap || "", com: f0.com || "", prov: f0.prov || "", email: f0.email || f0.pec || "", pec: f0.pec || "", intestatario: "Demo" }, fornitore: ASS, documenti: Object.fromEntries(Object.entries(DOCUMENTI).map(function (e) { return [e[0], { v: e[1].v, titolo: e[1].titolo }]; })), account: 25, piano: "pro" }); }
     if (p === "/api/staff") return json(200, S.staff.map(function (x) { return { id: x.id, nome: x.nome, ruolo: x.ruolo }; }));
     if (p === "/api/setup") return json(409, { errore: "Il locale è già configurato" });
     if (p === "/api/login") {
@@ -1394,7 +1429,7 @@ module.exports = { CONSERVAZIONI, daOrdinare, qtaSuggerita, inOrdine, TIPI_EVENT
       if (!u0 || !L.verificaPin(u0, corpo.pin)) return json(401, { errore: "PIN sbagliato" });
       var t = randomBytes(24).toString("base64url"); D.sessioni[t] = { sid: u0.id, creato: Date.now() };
       S.log.unshift({ ora: Date.now(), chi: u0.nome, txt: "Accesso" }); salva();
-      return json(200, { token: t, utente: { id: u0.id, nome: u0.nome, ruolo: u0.ruolo } });
+      return json(200, { token: t, utente: { id: u0.id, nome: u0.nome, ruolo: u0.ruolo }, consensi: [] });
     }
     if (p === "/api/sblocco/richiesta") return url.searchParams.get("id") ? json(400, { errore: "Nella demo i PIN sono 1111, 2222, 3333 e 4444" }) : json(200, { attiva: false });
     if (p === "/api/sblocco") return json(400, { errore: NONDEMO });
@@ -1437,7 +1472,9 @@ module.exports = { CONSERVAZIONI, daOrdinare, qtaSuggerita, inOrdine, TIPI_EVENT
     var u = utente(token);
     if (!u) return json(401, { errore: "Accesso scaduto: entra di nuovo con il tuo PIN" });
 
-    if (p === "/api/io") return json(200, { id: u.id, nome: u.nome, ruolo: u.ruolo });
+    if (p === "/api/io") return json(200, { id: u.id, nome: u.nome, ruolo: u.ruolo, consensi: [] });
+    if (p === "/api/consensi/accetta") return json(200, { ok: true });
+    if (p === "/api/consensi") return json(200, { documenti: DOCUMENTI, registro: (S.consensi || []).slice(-3000).reverse(), staff: S.staff.map(function (x) { return { id: x.id, nome: x.nome, ruolo: x.ruolo, mancano: [] }; }) });
     if (p === "/api/diagnostica") return json(200, { versione: VERSIONE, locale: S.settings.nome, citta: S.settings.citta, utente: u.nome + " (" + L.RUOLI[u.ruolo] + ")", licenza: "demo · piano pro", sistema: "Demo nel browser", ora: new Date().toLocaleString("it-IT"), ultimiErrori: [] });
     if (p === "/api/logout") { delete D.sessioni[token]; salva(); return json(200, { ok: true }); }
     if (p === "/api/traduci") return json(502, { errore: "Nella demo la traduzione automatica è spenta. Nel locale Tavolo traduce il menu da solo in inglese, francese, tedesco e spagnolo" });
@@ -1446,7 +1483,7 @@ module.exports = { CONSERVAZIONI, daOrdinare, qtaSuggerita, inOrdine, TIPI_EVENT
     if (p === "/api/azione") {
       var bozza = structuredClone(S);
       var r2;
-      try { r2 = L.applica(bozza, corpo, u, { bloccata: false, sospesa: false, piano: "pro", tecnicoLibero: true }); } catch (e) { return json(400, { errore: e.message }); }
+      try { r2 = L.applica(bozza, corpo, u, { bloccata: false, sospesa: false, piano: "pro", tecnicoLibero: true, maxAccount: 25 }); } catch (e) { return json(400, { errore: e.message }); }
       if (r2.errore) return json(400, { errore: r2.errore });
       D.S = bozza;
       if (r2.archivio) { var mese = L.giorno(Date.now()).slice(0, 7); if (D.mesi.indexOf(mese) < 0) D.mesi.unshift(mese); }

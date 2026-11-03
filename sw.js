@@ -1,6 +1,6 @@
 // Tavolo demo: funziona anche senza internet dopo la prima apertura
-const C = "tavolo-demo-1.12.0";
-const FILE = ["./", "index.html", "ordina.html", "demo.js", "qrcode.js", "icona.svg", "icona-192.png", "icona-512.png", "icona-180.png", "manifest.webmanifest"];
+const C = "tavolo-demo-1.14.1";
+const FILE = ["./", "index.html", "ordina.html", "demo.js", "qrcode.js", "icona.svg", "icona-192.png", "icona-512.png", "icona-180.png", "manifest.webmanifest", "consenso.js", "documenti.js", "privacy.html", "termini.html", "cookie.html", "nomina.html"];
 self.addEventListener("install", e => { e.waitUntil(caches.open(C).then(c => c.addAll(FILE))); self.skipWaiting(); });
 self.addEventListener("activate", e => { e.waitUntil(caches.keys().then(k => Promise.all(k.filter(x => x !== C).map(x => caches.delete(x))))); self.clients.claim(); });
 self.addEventListener("fetch", e => {

@@ -36,6 +36,8 @@ html,body{background:var(--bg);color:var(--fg)}
 body{margin:0;font-family:var(--f-body);font-size:15px;line-height:1.45;padding-inline:16px;padding-block:0 48px;-webkit-tap-highlight-color:transparent}
 *{box-sizing:border-box}
 [hidden]{display:none!important}
+.chk{display:flex;gap:10px;align-items:flex-start;font-weight:400;margin:8px 0;line-height:1.4}.chk input{margin-top:3px;flex:0 0 auto;width:20px;height:20px}
+.cons{border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin:10px 0;background:var(--surface)}.cons summary{cursor:pointer;color:var(--accent);margin:6px 0}
 button,input,select,textarea{font:inherit;color:inherit}
 button{cursor:pointer}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
@@ -361,6 +363,7 @@ try{const h=location.hash.slice(1);if(TABS[h])UI.tab=h}catch(e){}
 async function richiesta(url,opt){opt=opt||{};const h=Object.assign({"Content-Type":"application/json"},opt.headers||{});if(token)h.Authorization="Bearer "+token;
   const r=await fetch(url,Object.assign({},opt,{headers:h}));let j={};try{j=await r.json()}catch(e){}
   if(r.status===401&&token&&!url.includes("/login")){esci("Il tuo accesso è scaduto: entra di nuovo con il PIN");throw new Error("401")}
+  if(r.status===428&&Array.isArray(j.consensi)){schermataConsensi(j.consensi);throw new Error(j.errore||"Documenti da accettare")}
   if(!r.ok)throw new Error(j.errore||"Errore "+r.status);return j}
 let coda=Promise.resolve();
 function api(type,payload){
@@ -377,7 +380,7 @@ function connetti(){
   es.addEventListener("esci",()=>esci("Il tuo accesso è stato chiuso: entra di nuovo con il PIN"));
   es.onopen=()=>{if(!online){online=true;if(S)render()}};
   es.onerror=async()=>{const era=online;online=false;if(S&&era)renderBanners();
-    if(es.readyState===2){try{await richiesta("/api/io");setTimeout(connetti,2000)}catch(e){if(e.message!=="401")setTimeout(connetti,3000)}}};
+    if(es.readyState===2){try{const io=await richiesta("/api/io");if(io.consensi&&io.consensi.length)return schermataConsensi(io.consensi);setTimeout(connetti,2000)}catch(e){if(e.message!=="401")setTimeout(connetti,3000)}}};
 }
 function esci(msg){if(es){es.close();es=null}token=null;store.set("tavolo-token",null);S=null;online=false;UI.modal=null;$("modalRoot").innerHTML="";if(msg)toast(msg,true);avvio()}
 
@@ -514,7 +517,7 @@ function renderTabs(){
   const tabs=allowedTabs();if(!tabs.includes(UI.tab))UI.tab=tabs[0];
   const k=S.comande.filter(c=>c.stato==="prep").length,low=S.settings.moduli.magazzino?lowStock().length:0,pres=S.prenotazioni.filter(p=>p.data===dkey(now())&&p.stato==="attesa").length;
   const nq=S.settings.moduli.qr&&me().ruolo!=="cucina"?qrTutte().length:0,nh=S.settings.moduli.haccp?mancantiOggi().length:0;
-  $("tabs").innerHTML=tabs.map(id=>{const b=id==="sala"&&nq?`<span class="badge">${nq}</span>`:id==="cucina"&&k?`<span class="badge">${k}</span>`:id==="magazzino"&&low?`<span class="badge">${low}</span>`:id==="haccp"&&nh?`<span class="badge" title="Controlli di oggi da fare">${nh}</span>`:id==="prenotazioni"&&pres?`<span class="badge" style="background:var(--info)">${pres}</span>`:"";
+  $("tabs").innerHTML=tabs.map(id=>{const b=id==="sala"&&nq?`<span class="badge">${nq}</span>`:id==="prenotazioni"&&S.prenotazioni.some(prenDaAvvisare)?`<span class="badge" title="Promemoria da mandare">${S.prenotazioni.filter(prenDaAvvisare).length}</span>`:id==="cucina"&&k?`<span class="badge">${k}</span>`:id==="magazzino"&&low?`<span class="badge">${low}</span>`:id==="haccp"&&nh?`<span class="badge" title="Controlli di oggi da fare">${nh}</span>`:id==="prenotazioni"&&pres?`<span class="badge" style="background:var(--info)">${pres}</span>`:"";
     return`<button role="tab" aria-selected="${id===UI.tab}" data-tab="${id}">${TABS[id]}${b}</button>`}).join("");
 }
 function render(){
@@ -547,8 +550,25 @@ async function avvio(){
   try{const f=new URLSearchParams(location.search).get("tecnico");if(f)return schermataTecnicoAttiva(f)}catch(e){}
   try{if(new URLSearchParams(location.search).has("assistenza")){pulisciUrl();return schermataTecnico()}}catch(e){}
   if(!token)return schermataLogin();
-  $("view").innerHTML=`<p class="empty">Collegamento…</p>`;connetti();
+  dopoAccesso();
 }
+/* ---------- Documenti da accettare (doppia conferma: spunte + PIN come firma) ---------- */
+async function dopoAccesso(mancano){
+  if(!mancano){try{mancano=(await richiesta("/api/io")).consensi||[]}catch(e){if(e.message==="401")return;mancano=[]}}
+  if(mancano.length)return schermataConsensi(mancano);
+  $("view").innerHTML=`<p class="empty">Collegamento…</p>`;connetti()}
+function schermataConsensi(mancano){
+  if(es){es.close();es=null}S=null;online=false;$("top").hidden=true;UI.consensi=mancano;UI.modal=null;$("modalRoot").innerHTML="";
+  const tit=mancano.some(d=>d.doc==="termini");
+  const sp=d=>d.doc==="vessatorie"?"Approvo in modo specifico le clausole 3, 4, 8, 9, 10, 11, 12, 13 e 14":d.doc==="privacy"||d.doc==="cookie"?"Confermo di averne preso visione":"Accetto";
+  $("view").innerHTML=`<div class="full"><div class="logo">T</div><h2>Prima di iniziare</h2>
+  <p class="lead" style="text-align:center;margin:0 auto;max-width:620px">${tit?"Come titolare del locale leggi e accetta questi documenti.":"Leggi questi documenti: spiegano come Tavolo tratta i tuoi dati."} Servono due conferme: le spunte qui sotto e poi il tuo PIN come firma. Verranno registrati data, ora e dispositivo.</p>
+  <div style="max-width:680px;margin:0 auto;width:100%">${mancano.map((d,i)=>`<div class="cons"><div class="spread"><b>${esc(d.titolo)}</b><a class="btn sm" href="${esc(d.pagina)}" target="_blank" rel="noopener">Apri</a></div>
+    <details><summary>Leggi qui</summary><iframe src="${esc(d.pagina)}" title="${esc(d.titolo)}" loading="lazy" style="width:100%;height:360px;border:1px solid var(--line);border-radius:8px;background:#fff"></iframe></details>
+    <label class="chk"><input type="checkbox" id="cL${i}"> Ho letto e compreso il documento</label>
+    <label class="chk"><input type="checkbox" id="cA${i}"> ${sp(d)}</label></div>`).join("")}
+  <button class="btn primary" data-act="consAvanti" style="padding:12px;width:100%;margin-top:6px">Continua</button></div>
+  <button class="btn ghost" data-act="consRifiuta" style="margin:0 auto">Non accetto, esci</button>${stripAssistenza()}</div>`}
 const qrSvg=(t,cell)=>{try{const q=qrcode(0,"M");q.addData(t);q.make();return q.createSvgTag({cellSize:cell||4,margin:2,scalable:true})}catch(e){return""}};
 const pulisciUrl=()=>{try{history.replaceState(null,"",location.pathname)}catch(e){}};
 async function schermataSblocco(id){let r;try{r=await richiesta("/api/sblocco/richiesta?id="+encodeURIComponent(id))}catch(e){toast(e.message,true);return}UI.sblocco=r;UI.sbFirma=null;
@@ -581,6 +601,7 @@ async function schermataTecnicoAttiva(firma){let r={};try{r=await (await fetch("
   <div class="fgrid"><label>Nuovo PIN dell'assistenza (6–8 cifre)<input type="password" inputmode="numeric" maxlength="8" id="tecP1" autocomplete="off"></label><label>Ripeti PIN<input type="password" inputmode="numeric" maxlength="8" id="tecP2" autocomplete="off"></label></div>
   <button class="btn primary" data-act="tecAttiva">Attiva</button></div>`:""}
   <button class="btn ghost" data-act="tecIndietro" style="margin:0 auto">Indietro</button></div>`}
+const DOC_SETUP=[["termini","termini.html","Ho letto e accetto le","Condizioni di licenza d'uso"],["vessatorie","termini.html#vessatorie","Approvo in modo specifico le clausole 3, 4, 8, 9, 10, 11, 12, 13 e 14 delle","Condizioni (artt. 1341 e 1342 c.c.)"],["nomina","nomina.html","Ho letto e accetto l'","Accordo sul trattamento dei dati (art. 28 GDPR)"],["privacy","privacy.html","Ho letto l'","Informativa privacy"],["cookie","cookie.html","Ho letto l'informativa su","Cookie e dati salvati"]];
 function schermataSetup(){
   $("view").innerHTML=`<div class="full"><div class="logo">T</div><h2>Benvenuto in Tavolo</h2><p class="lead" style="text-align:center;margin:0 auto">Configura il locale. Potrai cambiare tutto dopo da Impostazioni.</p>
   <div class="panel form">
@@ -588,6 +609,8 @@ function schermataSetup(){
   <div class="fgrid"><label>Tipo di locale<input type="text" id="suTipo" placeholder="es. Pizzeria"></label><label>Città<input type="text" id="suCitta" value="Catania"></label></div>
   <div class="fgrid"><label>Menu di partenza<select id="suModello"><option value="trattoria">Trattoria / ristorante</option><option value="pizzeria">Pizzeria</option><option value="bar">Bar e caffetteria</option></select></label><label>Tavoli in sala<input type="number" id="suTavoli" min="1" max="60" value="10"></label></div>
   <div class="fgrid"><label>Il tuo nome<input type="text" id="suTit" placeholder="Titolare"></label><label>PIN titolare (4 cifre)<input type="password" inputmode="numeric" maxlength="4" id="suPin"></label><label>Ripeti PIN<input type="password" inputmode="numeric" maxlength="4" id="suPin2"></label></div>
+  <div class="cons"><b>Documenti da accettare</b><div class="small muted">Aprili e leggili prima di creare il locale. Poi ti chiediamo una seconda conferma.</div>
+  ${DOC_SETUP.map(d=>`<label class="chk"><input type="checkbox" id="suD_${d[0]}"> <span>${d[2]} <a href="${d[1]}" target="_blank" rel="noopener">${d[3]}</a></span></label>`).join("")}</div>
   <label style="display:flex;gap:8px;align-items:center;font-weight:400"><input type="checkbox" id="suDemo"> Carica i dati di esempio (solo per dimostrazioni)</label>
   <button class="btn primary" style="padding:12px" data-act="setup">Crea il locale</button></div></div>`;
 }
@@ -599,8 +622,7 @@ function disegnaLogin(){
   const staff=UI.loginStaff||[];
   if(!UI.pinUser){$("view").innerHTML=`<div class="full"><div class="logo">${esc((INFO.nome||"T")[0].toUpperCase())}</div><h2>${esc(INFO.nome)}</h2><p class="lead" style="text-align:center;margin:0 auto">Chi sei? Tocca il tuo nome.</p>
     <div class="who">${staff.map(p=>`<button data-act="pickUser" data-id="${p.id}"><b>${esc(p.nome)}</b><span>${ROLES[p.ruolo]}</span></button>`).join("")}</div>
-    ${INFO.demo?`<p class="note" style="margin:0 auto">Dimostrazione: PIN 1111 titolare, 2222 cassa, 3333 cameriere, 4444 cucina.</p>`:""}${stripAssistenza()}
-    </div>`;return}
+    ${INFO.demo?`<p class="note" style="margin:0 auto">Dimostrazione: PIN 1111 titolare, 2222 cassa, 3333 cameriere, 4444 cucina.</p>`:""}${stripAssistenza()}</div>`;return}
   const p=staff.find(x=>x.id===UI.pinUser);
   $("view").innerHTML=`<div class="full"><h2>Ciao ${esc(p.nome)}</h2><p class="lead" style="text-align:center;margin:0 auto">Inserisci il tuo PIN</p>
   <div class="pindots">${[0,1,2,3].map(i=>`<i class="${UI.pin.length>i?"on":""}"></i>`).join("")}</div>
@@ -1028,18 +1050,24 @@ prenotazioni(){
   const attese=list.filter(p=>p.stato==="attesa");
   const tavOpts=`<option value="">Da assegnare</option>`+S.tavoli.filter(t=>t.posti>0).map(t=>`<option value="${t.id}">${esc(tavLabel(t))} · ${t.posti} posti</option>`).join("");
   const stati={arrivato:`<span class="chip ok">Arrivato</span>`,chiusa:`<span class="chip mut">Servito</span>`,annullata:`<span class="chip mut">Annullata</span>`};
-  return`<div class="spread"><h2>Prenotazioni</h2>${can("ordina")?`<button class="btn" data-act="prenWa">Da WhatsApp</button>`:""}</div><p class="lead">Segna chi arriva e a che ora. Quando il cliente entra, tocca Arrivato: il tavolo si apre con i coperti già impostati.</p>
+  const po=PO(),avv=S.prenotazioni.filter(prenDaAvvisare).sort((a,b)=>a.ora.localeCompare(b.ora));
+  const sito=list.filter(p=>p.k),conf=sito.filter(p=>p.conf==="confermata"&&p.stato!=="annullata").length,disd=sito.filter(p=>p.conf==="disdetta").length,inatt=sito.filter(p=>p.stato==="attesa"&&p.conf!=="confermata").length;
+  return`<div class="spread"><h2>Prenotazioni</h2><div class="row">${po.diretta&&prenBase()?`<button class="btn" data-act="apriPrenota">Pagina Prenota</button>`:""}${can("ordina")&&!po.diretta?`<button class="btn" data-act="prenWa">Da WhatsApp</button>`:""}</div></div><p class="lead">Segna chi arriva e a che ora. Quando il cliente entra, tocca Arrivato: il tavolo si apre con i coperti già impostati.${po.diretta?" Le prenotazioni fatte dalla pagina Prenota arrivano qui da sole."+(po.promemoria?" Un'ora prima il cliente conferma o disdice dal suo telefono.":""):""}</p>
+  ${avv.length?`<div class="banner warn" style="margin:0 0 14px"><b>Promemoria da mandare (${avv.length})</b><span>Tra meno di un'ora arrivano clienti che non hanno ancora confermato.</span>${avv.slice(0,4).map(p=>`<a class="btn sm" href="${esc(prenWaLink(p))}" target="_blank" rel="noopener" data-act="prenAvvisa" data-id="${p.id}">${esc(p.ora)} · ${esc(p.nome)}${p.avvisato?" ✓":""}</a>`).join("")}</div>`:""}
   <div class="pills" style="margin-bottom:14px">${days.map((d,i)=>{const n=S.prenotazioni.filter(p=>p.data===d&&p.stato==="attesa").length;return`<button data-act="presDay" data-v="${d}" aria-pressed="${d===UI.presDay}">${i===0?"Oggi":i===1?"Domani":dayName(d)}${n?` · ${n}`:""}</button>`}).join("")}<input type="date" id="presAltro" data-srv="1" value="${UI.presDay}" aria-label="Altro giorno" style="padding:4px 8px"></div>
   <div class="grid2"><div class="panel"><div class="spread" style="margin-bottom:8px"><h3>${UI.presDay===days[0]?"Oggi":dayName(UI.presDay)}</h3><span class="chip info">${attese.reduce((s,p)=>s+ +p.persone,0)} coperti attesi</span></div>
+  ${sito.length?`<div class="small muted" style="margin:-2px 0 8px">Dal sito: ${sito.length} · <span style="color:var(--ok)">${conf} confermate</span> · ${inatt} da confermare${disd?` · <span style="color:var(--crit)">${disd} disdette</span>`:""}</div>`:""}
   ${list.length?`<div class="tablewrap"><table><tbody>${list.map(p=>{const t=T(p.tavolo);
-    return`<tr><td class="num" style="width:58px">${esc(p.ora)}</td><td><b>${esc(p.nome)}</b> · ${p.persone} pers.${p.fonte==="online"?` <span class="chip info">online</span>`:""}${S.settings.moduli.clienti&&p.tel&&cliDaTel(p.tel)?` <span class="chip ok" title="Cliente abituale">abituale · ${cliDaTel(p.tel).visite||0} visite</span>`:""}${p.acc?` <span class="chip info" title="Serve un tavolo accessibile">♿ accessibile</span>`:""}<div class="small muted">${t?esc(tavLabel(t)):"Tavolo da assegnare"}${p.tel?" · "+esc(p.tel):""}</div>${p.note?`<div class="small" style="color:var(--warn)">${esc(p.note)}</div>`:""}</td>
-    <td class="r">${p.stato==="attesa"?`<div class="row" style="justify-content:flex-end"><button class="btn sm primary" data-act="presArr" data-id="${p.id}">Arrivato</button><button class="btn sm" data-act="presDel" data-id="${p.id}">Annulla</button></div>`:stati[p.stato]||""}${p.stato==="annullata"?` <button class="btn sm ghost" data-act="presRip" data-id="${p.id}">Ripristina</button>`:""}</td></tr>`}).join("")}</tbody></table></div>`:`<p class="empty">Nessuna prenotazione per questo giorno.</p>`}</div>
+    return`<tr><td class="num" style="width:58px">${esc(p.ora)}</td><td><b>${esc(p.nome)}</b> · ${p.persone} pers.${p.fonte==="online"?` <span class="chip info">online</span>`:p.fonte==="sito"?` <span class="chip info">dal sito</span>`:""}${prenChipConf(p)}${S.settings.moduli.clienti&&p.tel&&cliDaTel(p.tel)?` <span class="chip ok" title="Cliente abituale">abituale · ${cliDaTel(p.tel).visite||0} visite</span>`:""}${p.acc?` <span class="chip info" title="Serve un tavolo accessibile">♿ accessibile</span>`:""}<div class="small muted">${t?esc(tavLabel(t)):"Tavolo da assegnare"}${p.tel?" · "+esc(p.tel):""}</div>${p.note?`<div class="small" style="color:var(--warn)">${esc(p.note)}</div>`:""}</td>
+    <td class="r">${p.stato==="attesa"?`<div class="row" style="justify-content:flex-end">${p.k&&p.conf!=="confermata"&&p.tel?`<a class="btn sm" href="${esc(prenWaLink(p))}" target="_blank" rel="noopener" data-act="prenAvvisa" data-id="${p.id}" title="Manda su WhatsApp il link per confermare o disdire">${p.avvisato?"Promemoria ✓":"Promemoria"}</a>`:""}${p.k&&p.conf!=="confermata"?`<button class="btn sm ghost" data-act="prenConf" data-id="${p.id}" data-v="confermata" title="Il cliente ha confermato al telefono">Confermata</button>`:""}<button class="btn sm primary" data-act="presArr" data-id="${p.id}">Arrivato</button><button class="btn sm" data-act="presDel" data-id="${p.id}">Annulla</button></div>`:stati[p.stato]||""}${p.stato==="annullata"?` <button class="btn sm ghost" data-act="presRip" data-id="${p.id}">Ripristina</button>`:""}</td></tr>`}).join("")}</tbody></table></div>`:`<p class="empty">Nessuna prenotazione per questo giorno.</p>`}</div>
   <div class="panel"><h3 style="margin-bottom:10px">Nuova prenotazione</h3><div class="fgrid">
   <label>Nome<input type="text" id="pNome" placeholder="Cognome o nome"></label><label>Telefono<input type="tel" id="pTel" placeholder="333 ..."></label>
   <label>Giorno<input type="date" id="pData" value="${UI.presDay}"></label><label>Ora<input type="time" id="pOra" value="20:30"></label>
   <label>Persone<input type="number" id="pPers" min="1" value="2"></label><label>Tavolo<select id="pTav">${tavOpts}</select></label></div>
   <label style="display:grid;gap:4px;font-size:13.5px;font-weight:500;margin-top:10px">Note<input type="text" id="pNote" placeholder="Allergie, seggiolone, occasione"></label>
   <label class="row small" style="gap:6px;margin-top:8px"><input type="checkbox" id="pAcc"> ♿ Serve un tavolo accessibile (sedia a rotelle)</label>
+  <label class="chk small"><input type="checkbox" id="pPriv"> <span><b>Obbligatorio:</b> ho detto al cliente che il locale usa nome e telefono solo per questa prenotazione e dove trovare l'<a href="privacy.html#clienti" target="_blank" rel="noopener">informativa privacy</a> (a voce, al telefono o stampata)</span></label>
+  <label class="chk small"><input type="checkbox" id="pSal"> <span><b>Se scrivi allergie o accessibilità:</b> il cliente acconsente in modo esplicito che il locale usi queste informazioni solo per la prenotazione</span></label>
   <div class="row" style="margin-top:12px"><button class="btn primary" data-act="presAdd">Salva prenotazione</button></div></div></div>`;
 },
 eventi(){
@@ -1195,7 +1223,12 @@ impostazioni(){
   ${TEC()?`<div class="row" style="margin-top:10px"><input type="text" id="ipLan" inputmode="decimal" value="${esc(S.settings.indirizzoLan||"")}" placeholder="Indirizzo del computer, es. 192.168.1.20" maxlength="15" style="flex:1 1 200px" aria-label="Indirizzo del computer nel Wi-Fi"><button class="btn sm" data-act="salvaIp">${S.settings.indirizzoLan?"Cambia indirizzo":"Usa questo indirizzo"}</button></div>`:""}</div>
   <div class="panel"><h3 style="margin-bottom:6px">Licenza e assistenza</h3><div class="row"><span class="chip ${statoLic[0]}">${statoLic[1]}</span><span class="small">${L.tipo==="licenza"?`${esc(L.intestatario)} · piano ${esc(L.piano)} · fino al ${ddmm(L.scadenza)}/${L.scadenza.slice(0,4)}`:`prova fino al ${ddmm(L.scadenza)}/${L.scadenza.slice(0,4)}`}</span></div>
   ${ass.tel||ass.email?`<div class="spread small" style="margin-top:8px"><span>Assistenza: <b>${esc(ass.nome||"")}</b> ${esc(ass.tel||"")} ${esc(ass.email||"")}</span><button class="btn sm" data-act="assistenza">Contatta</button></div>`:""}
-  <textarea id="licTxt" rows="3" placeholder="Incolla qui il codice di licenza ricevuto" style="margin-top:10px"></textarea><div class="row" style="margin-top:8px"><button class="btn" data-act="licenza">Installa licenza</button><span class="small muted">Versione ${esc(S.meta.versione)}</span></div></div>
+  <textarea id="licTxt" rows="3" placeholder="Incolla qui il codice di licenza ricevuto" style="margin-top:10px"></textarea><div class="row" style="margin-top:8px"><button class="btn" data-act="licenza">Installa licenza</button><span class="small muted">Versione ${esc(S.meta.versione)}</span></div>
+  ${L.account?`<div class="small" style="margin-top:8px">Account: <b>${L.account.usati}</b> di <b>${L.account.max}</b> compresi nella licenza${L.account.superato?` · <b style="color:var(--crit)">troppi: entrano solo i primi ${L.account.max}. Togli ${L.account.usati-L.account.max} persone dallo staff o chiedi un piano più grande.</b>`:""}</div>`:""}</div>
+  <div class="panel"><h3 style="margin-bottom:4px">Privacy e consensi</h3><div class="small muted">Documenti che titolare e staff accettano in Tavolo. Ogni accettazione è registrata con data, ora, persona e dispositivo. Completa i dati del titolare in Dati fiscali: compaiono nell'informativa.</div>
+  <div class="row" style="margin-top:10px"><a class="btn sm" href="privacy.html" target="_blank" rel="noopener">Informativa privacy</a><a class="btn sm" href="cookie.html" target="_blank" rel="noopener">Cookie</a><a class="btn sm" href="termini.html" target="_blank" rel="noopener">Condizioni di licenza</a><a class="btn sm" href="nomina.html" target="_blank" rel="noopener">Accordo dati</a></div>
+  <div class="row" style="margin-top:8px"><button class="btn sm" data-act="consRegistro">Registro dei consensi</button><button class="btn sm" data-act="consCsv">Scarica il registro (CSV)</button></div>
+  <p class="note" style="margin-top:8px">Clienti: l'informativa è collegata alla pagina Prenota e all'ordine dal QR. Per chi prenota al telefono o al banco, tienila stampata o mostrala dal tablet.</p></div>
   ${TEC()?`<div class="panel"><h3 style="margin-bottom:4px">Modello di partenza</h3><div class="small muted">Carica un menu tipo. Sostituisce menu e categorie, non tocca vendite e magazzino.</div>
   <div class="row" style="margin-top:10px">${UI.pending&&UI.pending.startsWith("preset:")?`<span class="confirm">Sostituire il menu con il modello ${esc(UI.pending.slice(7))}? <button class="btn sm danger" data-act="doPreset">Sostituisci</button><button class="btn sm" data-act="cancel">Annulla</button></span>`:[["bar","Bar e caffetteria"],["pizzeria","Pizzeria"],["trattoria","Trattoria"]].map(([k,l])=>`<button class="btn" data-act="askPreset" data-v="${k}">${l}</button>`).join("")}</div></div>`:""}
   <div class="panel"><h3 style="margin-bottom:4px">Backup</h3><div class="small muted">Il computer del locale salva da solo una copia al giorno (ultimi 60 giorni). Scarica un backup anche su chiavetta o email una volta a settimana.</div>
@@ -1217,8 +1250,26 @@ function pannelloConsegne(){const pl=piattaforme();
   <div class="tablewrap" style="margin-top:8px"><table><thead><tr><th>Piattaforma</th><th class="r">Commissione %</th></tr></thead><tbody>${pl.map((x,i)=>`<tr><td><input type="text" id="plN-${i}" value="${esc(x.nome)}" maxlength="20" style="width:150px" aria-label="Nome"></td><td class="r"><input type="number" id="plC-${i}" value="${x.comm}" min="0" max="100" step="0.5" style="width:80px" class="num" aria-label="Commissione"></td></tr>`).join("")}
   <tr><td><input type="text" id="plN-new" placeholder="Altra piattaforma" maxlength="20" style="width:150px"></td><td class="r"><input type="number" id="plC-new" min="0" max="100" step="0.5" placeholder="0" style="width:80px" class="num"></td></tr></tbody></table></div>
   <div class="row" style="margin-top:8px"><button class="btn" data-act="salvaPiatt">Salva piattaforme</button><span class="small muted">Per togliere una piattaforma svuota il suo nome.</span></div></div>`}
-function linkPrenota(){const o=S.settings.prenOnline||{},base=S.meta.paginaPrenota;if(!base||!o.whatsapp)return"";const w=waNum(o.whatsapp);
-  const q=new URLSearchParams({n:S.settings.nome,w,o:o.orari||"",c:(o.chiuso||[]).join(","),m:String(o.max||10),a:(S.settings.accent||"").replace("#","")});return base+"?"+q.toString()}
+/* ---------- Prenotazioni dalla pagina Prenota (1.13) ---------- */
+const PO=()=>Object.assign({orari:"12:30-14:30,19:30-23:00",chiuso:[],max:10,diretta:true,promemoria:true},S.settings.prenOnline||{});
+const prenBase=()=>{const o=PO();if(!o.diretta)return o.pagina||S.meta.paginaPrenota||"";return o.indirizzo?o.indirizzo.replace(/\/+$/,"")+"prenota.html":(S.meta.linkDiretto||S.meta.paginaLocale||S.meta.paginaPrenota||"")};
+const prenLinkCliente=p=>{const b=prenBase();if(!b||!p.k)return"";return p.fid&&b.includes("?l=")?`${b}&p=${encodeURIComponent(p.fid)}`:`${b}${b.includes("?")?"&":"?"}p=${encodeURIComponent(p.id)}&k=${encodeURIComponent(p.k)}`};
+const prenInizio=p=>new Date(p.data+"T"+p.ora).getTime();
+const prenInFinestra=p=>{const d=prenInizio(p)-now();return d<=3600e3&&d>-30*60e3};
+const prenDaAvvisare=p=>p.stato==="attesa"&&p.k&&p.conf!=="confermata"&&p.tel&&prenInFinestra(p);
+function prenChipConf(p){
+  if(p.stato==="annullata"&&p.conf==="disdetta")return` <span class="chip crit">Disdetta dal cliente</span>`;
+  if(p.stato!=="attesa")return"";
+  if(p.conf==="confermata")return` <span class="chip ok">✓ Confermata${p.confDa&&p.confDa!=="cliente"?" a voce":""}</span>`;
+  if(!p.k||!PO().promemoria)return"";
+  const t0=prenInizio(p);
+  return prenInFinestra(p)?` <span class="chip warn">Aspetta la conferma</span>`:t0>now()?` <span class="chip mut">Conferma dalle ${hhmm(t0-3600e3)}</span>`:"";
+}
+function prenWaLink(p){const l=prenLinkCliente(p);if(!p.tel)return"";
+  const txt=`Ciao ${p.nome}, ti aspettiamo ${p.data===dkey(now())?"oggi":dayName(p.data)} alle ${p.ora} da ${S.settings.nome} (${p.persone} ${+p.persone===1?"persona":"persone"}).${l?`\nConfermi che arrivi? Tocca qui per confermare o disdire:\n${l}`:"\nConfermi che arrivi? Rispondi pure a questo messaggio."}\nA presto!`;
+  return`https://wa.me/${waNum(p.tel)}?text=${encodeURIComponent(txt)}`}
+function linkPrenota(){const o=PO(),base=prenBase();if(!base)return"";if(o.diretta)return base;if(!o.whatsapp)return"";const w=waNum(o.whatsapp);
+  const q=new URLSearchParams({n:S.settings.nome,w,o:o.orari||"",c:(o.chiuso||[]).join(","),m:String(o.max||10),a:(S.settings.accent||"").replace("#","")});return base+(base.includes("?")?"&":"?")+q.toString()}
 function pannelloAi(){const a=Object.assign({servizio:"claude",modello:"",url:"",limite:60},S.settings.ai),sv=UI.aiServ||a.servizio,mi=S.meta.ai||{};
   return`<div class="panel"><h3 style="margin-bottom:4px">✦ Assistente AI</h3><div class="small muted">Un aiuto per staff e titolare: spiega come si usa Tavolo e risponde sui numeri del locale (solo titolare e cassa). Non fa niente da solo: non cambia prezzi, ordini o impostazioni. Serve internet.</div>
   <div class="seg" style="margin-top:10px" role="group" aria-label="Servizio AI"><button data-act="aiServ" data-v="claude" aria-pressed="${sv==="claude"}">Claude (Anthropic)</button><button data-act="aiServ" data-v="compat" aria-pressed="${sv==="compat"}">Altro servizio compatibile</button></div>
@@ -1235,14 +1286,24 @@ function pannelloTraduzione(){const t=S.meta.traduzione||{},sv=UI.trDeepl?"deepl
   <p class="small muted" style="margin-top:8px">${sv==="mymemory"?"Servizio gratuito MyMemory: non serve registrarsi, ma ha un limite di testo al giorno. Va bene per tradurre il menu e qualche frase.":sv==="deepl"?"DeepL è più preciso. Serve una chiave API personale (anche gratuita) da deepl.com: incollala qui sotto.":"Traduzione automatica spenta: le traduzioni del menu si scrivono a mano."}</p>
   ${sv==="deepl"?`<div class="row"><input type="password" id="trKey" placeholder="${t.chiave?"Chiave salvata · incollane una nuova per cambiarla":"Chiave API di DeepL"}" style="flex:1 1 220px" autocomplete="off"><button class="btn" data-act="trChiave">Salva chiave</button></div>`:""}
   ${sv!=="spento"&&(sv!=="deepl"||t.chiave)?`<div class="row" style="margin-top:8px"><button class="btn sm" data-act="trProva">Prova la traduzione</button></div>`:""}</div>`}
-function pannelloPrenOnline(){const o=S.settings.prenOnline||{},link=linkPrenota(),gg=["Dom","Lun","Mar","Mer","Gio","Ven","Sab"];
-  return`<div class="panel"><h3 style="margin-bottom:4px">Prenotazioni online</h3><div class="small muted">Una pagina "Prenota" da mettere su Instagram, Google e sul sito. Il cliente sceglie giorno, ora e persone; la richiesta arriva sul WhatsApp del locale. In Prenotazioni tocca "Da WhatsApp" e incolla il messaggio: diventa una prenotazione.</div>
-  <div class="fgrid" style="margin-top:10px"><label>WhatsApp del locale<input type="tel" id="poW" value="${esc(o.whatsapp||"")}" placeholder="es. 333 123 4567"></label><label>Orari prenotabili<input type="text" id="poO" value="${esc((o.orari||"12:30-14:30,19:30-23:00").replace(/,/g,", "))}"></label><label>Persone al massimo<input type="number" id="poM" min="1" max="50" value="${o.max||10}"></label></div>
+function statoInternet(o){const i=S.meta.internet||{};
+  if(o.indirizzo)return"";
+  if(i.attivo&&S.meta.linkDiretto)return i.stato==="errore"?`<p class="note" style="margin-top:10px;color:var(--crit)">La pagina su internet non riceve le prenotazioni: ${esc(i.errore||"collegamento non riuscito")}. Controlla la connessione del computer; se continua chiama l'assistenza.</p>`:`<p class="small" style="margin:10px 0 0;color:var(--ok)">● Pagina su internet attiva${i.ultimo?` · ultimo controllo alle ${hhmm(i.ultimo)}`:""}</p>`;
+  if(i.attivo)return`<p class="note" style="margin-top:10px">Sto collegando la pagina su internet: serve la connessione del computer e l'indirizzo degli aggiornamenti impostato.</p>`;
+  return S.meta.paginaLocale?`<p class="note" style="margin-top:10px">Per ora la pagina si apre solo con il Wi-Fi del locale.</p>`:""}
+function pannelloPrenOnline(){const o=PO(),modo=UI.poModo||(o.diretta?"diretta":"wa"),gg=["Dom","Lun","Mar","Mer","Gio","Ven","Sab"];
+  const link=modo==="diretta"?prenBase():linkPrenota();
+  return`<div class="panel"><h3 style="margin-bottom:4px">Prenotazioni online</h3><div class="small muted">Una pagina "Prenota" da mettere su Instagram, Google e sul sito. Il cliente sceglie giorno, ora e persone.</div>
+  <div class="seg" style="margin-top:10px" role="group" aria-label="Dove arrivano le prenotazioni"><button data-act="poModo" data-v="diretta" aria-pressed="${modo==="diretta"}">Direttamente in Tavolo</button><button data-act="poModo" data-v="wa" aria-pressed="${modo==="wa"}">Su WhatsApp</button></div>
+  <p class="small muted" style="margin:8px 0 0">${modo==="diretta"?"La prenotazione compare da sola in Prenotazioni, con un avviso su tutti i tablet. Nessun messaggio da copiare.":"La richiesta arriva sul WhatsApp del locale. In Prenotazioni tocca \"Da WhatsApp\" e incolla il messaggio: diventa una prenotazione."}</p>
+  ${modo==="diretta"?`<div class="switch" style="margin-top:6px"><span><b style="font-weight:600">Conferma un'ora prima</b><span class="small muted" style="display:block">Il cliente riceve il promemoria e tocca Confermo o Disdico. Se disdice, il posto si libera da solo.</span></span><button class="toggle" id="poPr" data-act="poPr" aria-pressed="${UI.poPr??o.promemoria}" aria-label="Conferma un'ora prima"></button></div>`:""}
+  <div class="fgrid" style="margin-top:10px"><label>WhatsApp del locale${modo==="diretta"?" (facoltativo)":""}<input type="tel" id="poW" value="${esc(o.whatsapp||"")}" placeholder="es. 333 123 4567"></label><label>Orari prenotabili<input type="text" id="poO" value="${esc((o.orari||"12:30-14:30,19:30-23:00").replace(/,/g,", "))}"></label><label>Persone al massimo<input type="number" id="poM" min="1" max="50" value="${o.max||10}"></label></div>
   <div class="row" style="margin-top:8px"><span class="small muted">Giorni di chiusura</span>${gg.map((g,i)=>`<label class="chip mut" style="cursor:pointer"><input type="checkbox" id="poC-${i}" ${(o.chiuso||[]).includes(i)?"checked":""} style="margin:0"> ${g}</label>`).join("")}</div>
-  <details style="margin-top:8px"><summary class="small muted" style="cursor:pointer">Indirizzo della pagina (per l'assistenza)</summary><input type="url" id="poP" value="${esc(o.pagina||"")}" placeholder="${esc(S.meta.paginaPrenota||"https://…/prenota.html")}" style="width:100%;margin-top:6px"></details>
-  <div class="row" style="margin-top:10px"><button class="btn primary" data-act="salvaPrenOnline">Salva</button></div>
-  ${link?`<div style="margin-top:12px"><div class="label">Link da condividere</div><div class="row" style="margin-top:4px"><code class="small" style="word-break:break-all;flex:1 1 240px">${esc(link)}</code><button class="btn sm" data-act="copyTxt" data-v="${esc(link)}">Copia</button><a class="btn sm" href="${esc(link)}" target="_blank" rel="noopener">Apri</a></div>
-  <div class="row" style="margin-top:8px"><div style="width:140px;background:#fff;border-radius:8px;padding:4px">${qrSvg(link)}</div><div style="display:grid;gap:6px"><button class="btn sm" data-act="scaricaQr" data-v="${esc(link)}" data-n="qr-prenota">Scarica QR per la stampa</button><span class="small muted">Da mettere in vetrina, sui tavoli o sul menu</span></div></div></div>`:`<p class="note" style="margin-top:10px">${o.whatsapp?"Manca l'indirizzo della pagina: lo imposta l'assistenza.":"Scrivi il WhatsApp del locale e salva per avere il link."}</p>`}</div>`}
+  ${modo==="diretta"?statoInternet(o):""}
+  <details style="margin-top:8px"><summary class="small muted" style="cursor:pointer">Indirizzi (per l'assistenza)</summary><div class="fgrid" style="margin-top:6px"><label>Indirizzo internet del locale<input type="url" id="poI" value="${esc(o.indirizzo||"")}" placeholder="https://nomelocale.tuodominio.it"></label><label>Pagina WhatsApp<input type="url" id="poP" value="${esc(o.pagina||"")}" placeholder="${esc(S.meta.paginaPrenota||"https://…/prenota.html")}"></label></div></details>
+  <div class="row" style="margin-top:10px"><button class="btn primary" data-act="salvaPrenOnline">Salva</button>${modo==="diretta"&&prenBase()?`<button class="btn" data-act="apriPrenota">Prova la pagina</button>`:""}</div>
+  ${link?`<div style="margin-top:12px"><div class="label">Link da condividere</div><div class="row" style="margin-top:4px"><code class="small" style="word-break:break-all;flex:1 1 240px">${esc(link)}</code><button class="btn sm" data-act="copyTxt" data-v="${esc(link)}">Copia</button></div>
+  <div class="row" style="margin-top:8px"><div style="width:140px;background:#fff;border-radius:8px;padding:4px">${qrSvg(link)}</div><div style="display:grid;gap:6px"><button class="btn sm" data-act="scaricaQr" data-v="${esc(link)}" data-n="qr-prenota">Scarica QR per la stampa</button><span class="small muted">Da mettere in vetrina, sui tavoli o sul menu</span></div></div></div>`:`<p class="note" style="margin-top:10px">${modo==="wa"&&!o.whatsapp?"Scrivi il WhatsApp del locale e salva per avere il link.":"Manca l'indirizzo della pagina: lo imposta l'assistenza."}</p>`}</div>`}
 function pannelloRT(){const r=S.settings.rt||{modo:"spento",reparto:1,auto:true};
   return`<div class="panel"><h3 style="margin-bottom:4px">Registratore telematico</h3><div class="small muted">Con un registratore Epson in rete (es. FP-81 II RT, FP-90 III) lo scontrino parte da solo all'incasso. Da collaudare con il tecnico del registratore prima dell'uso in servizio.</div>
   <div class="fgrid" style="margin-top:10px"><label>Modalità<select id="rtM"><option value="spento" ${r.modo==="spento"?"selected":""}>Spento: lo scontrino si batte a mano</option><option value="prova" ${r.modo==="prova"?"selected":""}>Prova senza registratore</option><option value="epson" ${r.modo==="epson"?"selected":""}>Registratore Epson</option></select></label><label>Indirizzo IP<input type="text" id="rtI" value="${esc(r.ip||"")}" placeholder="192.168.1.60"></label><label>Reparto predefinito<input type="number" id="rtR" min="1" max="99" value="${r.reparto||1}"></label></div>
@@ -1298,7 +1359,11 @@ function cliPannello(t){if(!S.settings.moduli.clienti||!can("ordina")||t.consegn
   if(!c)return isBusy(t)?`<div><button class="btn sm ghost" data-act="cliTav">+ Cliente abituale</button></div>`:"";
   const pref=Object.entries(c.piatti||{}).sort((a,b)=>b[1]-a[1]).slice(0,3).map(([n])=>esc(n)).join(", "),comp=c.compleanno&&c.compleanno===dkey(now()).slice(5);
   return`<div class="note"><div class="spread"><span>👤 <b>${esc(c.nome)}</b>${comp?" · 🎂 oggi è il suo compleanno":""} · ${c.visite||0} visite · ${c.punti||0} punti</span><button class="btn sm ghost" data-act="cliTav">Cambia</button></div>${pref?`<div class="small">Prende spesso: ${pref}</div>`:""}${c.note?`<div class="small" style="color:var(--warn)">${esc(c.note)}</div>`:""}${t.premio?`<div class="small" style="color:var(--accent)">Premio fedeltà applicato: i punti si scalano all'incasso</div>`:(c.punti||0)>=pc.soglia&&can("sconto")&&isBusy(t)?`<button class="btn sm primary" data-act="cliPremio" style="margin-top:6px">Usa il premio: −${eur(pc.premio)} (${pc.soglia} punti)</button>`:""}</div>`}
-const formCliente=(c,tav)=>`<div class="form"><div class="fgrid"><label>Nome<input type="text" id="cNome" value="${esc(c.nome||"")}" maxlength="50"></label><label>Telefono<input type="tel" id="cTel" value="${esc(c.tel||"")}" maxlength="20"></label><label>Compleanno (l'anno non conta)<input type="date" id="cComp" value="${c.compleanno?"2000-"+c.compleanno:""}"></label><label>Email<input type="email" id="cEmail" value="${esc(c.email||"")}" maxlength="80"></label></div><label>Note (allergie, tavolo preferito…)<input type="text" id="cNote" value="${esc(c.note||"")}" maxlength="160"></label>${c.id?"":`<div class="small" style="display:flex;gap:8px;align-items:flex-start"><input type="checkbox" id="cCons" style="margin-top:3px;flex:0 0 auto"><label for="cCons" style="display:block;font-weight:400">Il cliente è d'accordo che il locale salvi questi dati per riconoscerlo, per i punti fedeltà e per gli auguri di compleanno</label></div>`}<div class="row"><button class="btn primary" data-act="cliSalva" data-id="${c.id||""}" data-sutav="${tav?"1":""}">Salva cliente</button></div></div>`;
+const formCliente=(c,tav)=>`<div class="form"><div class="fgrid"><label>Nome<input type="text" id="cNome" value="${esc(c.nome||"")}" maxlength="50"></label><label>Telefono<input type="tel" id="cTel" value="${esc(c.tel||"")}" maxlength="20"></label><label>Compleanno (l'anno non conta)<input type="date" id="cComp" value="${c.compleanno?"2000-"+c.compleanno:""}"></label><label>Email<input type="email" id="cEmail" value="${esc(c.email||"")}" maxlength="80"></label></div><label>Note (tavolo preferito, abitudini…; allergie solo con la spunta qui sotto)<input type="text" id="cNote" value="${esc(c.note||"")}" maxlength="160"></label>
+  <div class="small">Prima di salvare, fai leggere al cliente l'<a href="privacy.html#clienti" target="_blank" rel="noopener">informativa privacy</a> e chiedi i consensi uno per uno.</div>
+  ${c.id?"":`<label class="chk small"><input type="checkbox" id="cCons"> <span><b>Obbligatorio:</b> il cliente acconsente che il locale salvi nome e contatti per riconoscerlo e per i punti fedeltà</span></label>`}
+  <label class="chk small"><input type="checkbox" id="cMkt" ${c.consensoMsg?"checked":""}> <span><b>Facoltativo:</b> il cliente acconsente agli auguri di compleanno e ai messaggi del locale (senza, il compleanno non si salva)</span></label>
+  <label class="chk small"><input type="checkbox" id="cSal" ${c.consensoSalute?"checked":""}> <span><b>Facoltativo:</b> il cliente acconsente in modo esplicito a salvare allergie o intolleranze nelle note (dati sulla salute)</span></label><div class="row"><button class="btn primary" data-act="cliSalva" data-id="${c.id||""}" data-sutav="${tav?"1":""}">Salva cliente</button></div></div>`;
 function pannelloRecRiep(){const s=S.settings;return`<div class="panel"><h3 style="margin-bottom:4px">Recensioni e riepilogo serale</h3>
   <div class="small muted">Link per lasciare una recensione su Google: lo trovi nel profilo Google Business del locale, alla voce "Chiedi recensioni" (inizia con https://g.page/ o https://search.google.com/).</div>
   <div class="row" style="margin-top:8px"><input type="url" id="recUrl" value="${esc(s.recensione||"")}" placeholder="https://g.page/r/..." style="flex:1 1 220px"><button class="btn" data-act="salvaRec">Salva</button>${s.recensione?`<button class="btn" data-act="recQr">Mostra QR</button>`:""}</div>
@@ -1345,6 +1410,16 @@ function orderPanel(t){
 
 /* ---------- Modali ---------- */
 const MODALS={
+  consFirma(){const n=(UI.consensi||[]).length;return`${mhead("Conferma e firma")}<div class="form"><p style="margin:0">Stai accettando ${n===1?"1 documento":n+" documenti"}. Il tuo nome, la data, l'ora e questo dispositivo vengono registrati come prova.</p>
+    <label class="chk"><input type="checkbox" id="cfOk"> Confermo: ho letto i documenti e li accetto</label>
+    <label>Il tuo PIN, come firma<input type="password" inputmode="numeric" maxlength="4" id="cfPin" autocomplete="off" autofocus></label>
+    <div class="row"><button class="btn primary" data-act="consFirma">Firma e accetta</button><button class="btn" data-act="close">Indietro</button></div></div>`},
+  consRegistro(m){if(!m.dati){richiesta("/api/consensi").then(j=>{if(UI.modal&&UI.modal.type==="consRegistro"){UI.modal.dati=j;renderModal()}}).catch(e=>toast(e.message,true));return`${mhead("Registro dei consensi")}<p class="empty">Carico…</p>`}
+    const d=m.dati,dt=t=>new Date(t).toLocaleString("it-IT",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"});
+    return`${mhead("Registro dei consensi","Chi ha accettato cosa, quando e da quale dispositivo")}
+    <h4 style="margin:6px 0">Staff</h4><div class="tablewrap"><table><thead><tr><th>Persona</th><th>Ruolo</th><th>Documenti</th></tr></thead><tbody>${d.staff.map(x=>`<tr><td>${esc(x.nome)}</td><td>${esc(ROLES[x.ruolo]||x.ruolo)}</td><td>${x.mancano.length?`<span class="chip warn">da accettare: ${esc(x.mancano.join(", "))}</span>`:`<span class="chip ok">tutto accettato</span>`}</td></tr>`).join("")}</tbody></table></div>
+    <h4 style="margin:12px 0 6px">Registro</h4><div class="tablewrap"><table><thead><tr><th>Quando</th><th>Chi</th><th>Documento</th><th>Versione</th><th>Come</th></tr></thead><tbody>${d.registro.slice(0,300).map(c=>`<tr><td class="num small">${dt(c.ora)}</td><td>${esc(c.nome)}</td><td class="small">${esc(c.titolo||c.doc)}</td><td class="small">${esc(c.v)}</td><td class="small">${esc(c.modo||"")}${c.ip?" · "+esc(c.ip):""}</td></tr>`).join("")||`<tr><td colspan="5" class="muted">Nessuna accettazione registrata</td></tr>`}</tbody></table></div>
+    <div class="row" style="margin-top:10px"><button class="btn" data-act="consCsv">Scarica tutto (CSV)</button></div>`},
 evEdit(m){const e=m.id?EVn(m.id):null;if(m.id&&!e)return null;const d=e||{tipo:"Compleanno",data:dkey(now()+14*864e5),ora:"20:30",persone:20,bambini:0,prezzo:"",prezzoBimbi:"",menu:[],extra:[],condizioni:EV_COND.join("\n"),valido:15,sala:""};
   const sale=[...new Set(["Locale intero",...(S.settings.sale||[]).filter(x=>x!=="Banco e asporto")])];
   const piatti=S.categorie.map(c=>`<optgroup label="${esc(c.nome)}">${S.menu.filter(x=>x.cat===c.nome).map(x=>`<option value="${esc(x.nome)}">${esc(x.nome)}</option>`).join("")}</optgroup>`).join("");
@@ -1655,6 +1730,12 @@ assistenza(m){const a=contattoAss();
 const val=id=>($(id)||{}).value;
 const pulisci=(...ids)=>ids.forEach(i=>UI.clear.add(i));
 const ACT={
+  consAvanti(){const m=UI.consensi||[];for(let i=0;i<m.length;i++){if(!$("cL"+i).checked||!$("cA"+i).checked){toast("Spunta entrambe le caselle di: "+m[i].titolo,true);$("cL"+i).scrollIntoView({block:"center"});return}}openModal("consFirma")},
+  async consFirma(){const pin=val("cfPin");if(!$("cfOk").checked){toast("Spunta la conferma finale",true);return}if(!/^\d{4}$/.test(pin)){toast("Scrivi il tuo PIN di 4 cifre",true);return}
+    try{await richiesta("/api/consensi/accetta",{method:"POST",body:JSON.stringify({documenti:(UI.consensi||[]).map(d=>({doc:d.doc,v:d.v,letto:true,accetto:true})),conferma:true,pin})});UI.consensi=null;closeModal();toast("Grazie: accettazione registrata");dopoAccesso([])}catch(e){toast(e.message,true)}},
+  async consRifiuta(){try{await richiesta("/api/logout",{method:"POST"})}catch(e){}esci("Senza accettare i documenti non si può usare Tavolo. Per domande parla con il titolare o con l'assistenza.")},
+  consRegistro(){openModal("consRegistro",{wide:true,xl:true})},
+  consCsv(){toast("Nella demo i download sono spenti",true)},
   evNuovo(){openModal("evEdit",{wide:true})},
   evFiltro(d){UI.evFiltro=d.v;render()},
   evApri(d){UI.pending=null;openModal("evView",{id:d.id,wide:true})},
@@ -1672,7 +1753,9 @@ const ACT={
   evDel(d){UI.pending="evdel:"+d.id;renderModal()},
   async evElimina(d){UI.pending=null;if(await api("ev.elimina",{id:d.id})){toast("Preventivo cancellato");closeModal();render()}},
   setup:async()=>{const pin=val("suPin");if(!/^\d{4}$/.test(pin)){toast("Il PIN deve avere 4 cifre",true);return}if(pin!==val("suPin2")){toast("I due PIN non coincidono",true);return}if(!val("suNome").trim()){toast("Scrivi il nome del locale",true);return}
-    try{await richiesta("/api/setup",{method:"POST",body:JSON.stringify({nome:val("suNome"),tipo:val("suTipo"),citta:val("suCitta"),modello:val("suModello"),tavoli:val("suTavoli"),nomeTitolare:val("suTit"),pin,demo:$("suDemo").checked})});toast("Locale creato: entra con il tuo PIN");avvio()}catch(e){toast(e.message,true)}},
+    const no=DOC_SETUP.find(d=>!$("suD_"+d[0]).checked);if(no){toast("Leggi e spunta: "+no[3],true);return}
+    if(!confirm("Confermi di aver letto e di accettare le Condizioni di licenza, le clausole approvate in modo specifico, l'Accordo sul trattamento dei dati e di aver letto l'Informativa privacy e quella sui cookie?\n\nL'accettazione viene registrata con data, ora e dispositivo."))return;
+    try{await richiesta("/api/setup",{method:"POST",body:JSON.stringify({nome:val("suNome"),tipo:val("suTipo"),citta:val("suCitta"),modello:val("suModello"),tavoli:val("suTavoli"),nomeTitolare:val("suTit"),pin,demo:$("suDemo").checked,accetto:Object.fromEntries(DOC_SETUP.map(d=>[d[0],true])),conferma:true})});toast("Locale creato: entra con il tuo PIN");avvio()}catch(e){toast(e.message,true)}},
   pinDimenticato(){const id=UI.pinUser;UI.pinUser=null;UI.pin="";schermataSblocco(id)},
   sbIndietro(){UI.sblocco=null;UI.sbFirma=null;pulisciUrl();schermataLogin()},
   async sbOk(){const firma=((val("sbFirma")||"").trim()||UI.sbFirma||"").trim(),pin=val("sbPin");
@@ -1695,7 +1778,7 @@ const ACT={
   pinCancel(){UI.pinUser=null;UI.pin="";disegnaLogin()},
   pinBack(){UI.pin=UI.pin.slice(0,-1);disegnaLogin()},
   async pinKey(d){if(UI.pin.length>=4)return;UI.pin+=d.v;disegnaLogin();
-    if(UI.pin.length===4){const pin=UI.pin;UI.pin="";try{const j=await richiesta("/api/login",{method:"POST",body:JSON.stringify({id:UI.pinUser,pin})});token=j.token;store.set("tavolo-token",token);UI.pinUser=null;UI.tab=ROLE_TABS[j.utente.ruolo][0];sblocca();$("view").innerHTML=`<p class="empty">Collegamento…</p>`;connetti()}catch(e){toast(e.message,true);disegnaLogin()}}},
+    if(UI.pin.length===4){const pin=UI.pin;UI.pin="";try{const j=await richiesta("/api/login",{method:"POST",body:JSON.stringify({id:UI.pinUser,pin})});token=j.token;store.set("tavolo-token",token);UI.pinUser=null;UI.tab=ROLE_TABS[j.utente.ruolo][0];sblocca();dopoAccesso(j.consensi||[])}catch(e){toast(e.message,true);disegnaLogin()}}},
   assistenza(){UI.diag=null;openModal("assistenza",{});richiesta("/api/diagnostica").then(d=>{UI.diag=d}).catch(()=>{})},
   assWa(){const a=contattoAss();window.open("https://wa.me/"+waNum(a.tel)+"?text="+encodeURIComponent(testoAssistenza(true)),"_blank","noopener")},
   assCopia(){copy(testoAssistenza(false))},
@@ -1760,7 +1843,10 @@ const ACT={
   async payOk(){const met=UI.modal.metodo||"carta";if(await api("tav.incassa",{tid:UI.selT,metodo:met,ricevuti:met==="contanti"?val("ricevuti"):null}))closeModal()},
   libera(){api("tav.libera",{tid:UI.selT})},
   presDay(d){UI.presDay=d.v;pulisci("pData");render()},
-  async presAdd(){if(await api("pren.nuova",{nome:val("pNome"),tel:val("pTel"),data:val("pData"),ora:val("pOra"),persone:val("pPers"),tavolo:val("pTav"),note:val("pNote"),acc:!!($("pAcc")&&$("pAcc").checked)})){UI.presDay=val("pData");pulisci("pNome","pTel","pNote","pTav","pData");if($("pAcc"))$("pAcc").checked=false;toast("Prenotazione salvata");render()}},
+  async presAdd(){const priv=!!($("pPriv")&&$("pPriv").checked),sal=!!($("pSal")&&$("pSal").checked),acc=!!($("pAcc")&&$("pAcc").checked);
+    if(!priv){toast("Spunta la casella dell'informativa privacy",true);return}
+    if((val("pNote")||"").trim()||acc){if(!sal){toast("Hai scritto note o accessibilità: spunta il consenso del cliente per questi dati, oppure toglile",true);return}}
+    if(await api("pren.nuova",{nome:val("pNome"),tel:val("pTel"),data:val("pData"),ora:val("pOra"),persone:val("pPers"),tavolo:val("pTav"),note:val("pNote"),acc,privacy:priv,salute:sal})){UI.presDay=val("pData");pulisci("pNome","pTel","pNote","pTav","pData");["pAcc","pPriv","pSal"].forEach(k=>{if($(k))$(k).checked=false});toast("Prenotazione salvata");render()}},
   presArr(d){openModal("arrivo",{pid:d.id})},
   async doArrivo(d){if(await api("pren.arrivo",{pid:UI.modal.pid,tid:d.id})){UI.selT=d.id;UI.tab="sala";UI.sala="Tutte";closeModal();render()}},
   presDel(d){api("pren.stato",{pid:d.id,stato:"annullata"})},
@@ -1912,7 +1998,13 @@ const ACT={
   async rtInvia(d){UI.pending=null;render();toast("Invio al registratore…");try{const j=await richiesta("/api/rt/invia",{method:"POST",body:JSON.stringify({vid:d.id})});toast(j.msg)}catch(e){if(e.message!=="401")toast(e.message,true)}},
   async rtManuale(d){UI.pending=null;try{const j=await richiesta("/api/rt/invia",{method:"POST",body:JSON.stringify({vid:d.id,manuale:true})});toast(j.msg)}catch(e){if(e.message!=="401")toast(e.message,true)}render()},
   async salvaPiatt(){const pl=piattaforme(),lista=[];pl.forEach((x,i)=>{const n=(val("plN-"+i)||"").trim();if(n)lista.push({id:x.id,nome:n,comm:val("plC-"+i)})});const nn=(val("plN-new")||"").trim();if(nn)lista.push({nome:nn,comm:val("plC-new")||0});if(await api("cons.piattaforme",{lista})){pulisci("plN-new","plC-new");toast("Piattaforme salvate")}},
-  async salvaPrenOnline(){const chiuso=[0,1,2,3,4,5,6].filter(i=>$("poC-"+i)&&$("poC-"+i).checked);if(await api("imp.prenOnline",{whatsapp:val("poW"),orari:val("poO"),max:val("poM"),chiuso,pagina:val("poP")}))toast("Prenotazioni online salvate")},
+  async salvaPrenOnline(){const chiuso=[0,1,2,3,4,5,6].filter(i=>$("poC-"+i)&&$("poC-"+i).checked),o=PO(),modo=UI.poModo||(o.diretta?"diretta":"wa");
+    if(await api("imp.prenOnline",{whatsapp:val("poW"),orari:val("poO"),max:val("poM"),chiuso,pagina:val("poP"),indirizzo:val("poI"),diretta:modo==="diretta",promemoria:UI.poPr??o.promemoria})){UI.poModo=null;UI.poPr=null;toast("Prenotazioni online salvate")}},
+  poModo(d){UI.poModo=d.v;render()},
+  poPr(){const o=PO();UI.poPr=!(UI.poPr??o.promemoria);const b=$("poPr");if(b)b.setAttribute("aria-pressed",UI.poPr)},
+  apriPrenota(){const u=prenBase();if(!u)return;if(window.TavoloDemo&&TavoloDemo.apriTel){TavoloDemo.apriTel("prenota.html","Questo è il telefono di un cliente che prenota dal vostro profilo Instagram. Prenota un tavolo: arriva subito in Prenotazioni.");return}const a=document.createElement("a");a.href=u;a.target="_blank";a.rel="noopener";a.click()},
+  prenAvvisa(d){api("pren.avvisato",{pid:d.id})},
+  prenConf(d){api("pren.conf",{pid:d.id,conf:d.v})},
   async salvaRT(){if(await api("imp.rt",{modo:val("rtM"),ip:val("rtI"),reparto:val("rtR"),auto:$("rtA").checked,piattaforma:$("rtP").checked}))toast("Registratore salvato")},
   async provaRT(){toast("Provo il collegamento…");try{const j=await richiesta("/api/rt/prova",{method:"POST"});toast(j.msg)}catch(e){if(e.message!=="401")toast(e.message,true)}},
   prenWa(){openModal("prenWa",{})},
@@ -1939,8 +2031,8 @@ const ACT={
   cliNuovo(){openModal("cliEdit",{})},
   cliModifica(d){openModal("cliEdit",{id:d.id})},
   async cliSalva(d){const nome=(val("cNome")||"").trim();if(!nome){toast("Scrivi il nome del cliente",true);return}const cons=$("cCons");if(cons&&!cons.checked){toast("Spunta il consenso del cliente",true);return}
-    const j=await api("cli.salva",{id:d.id||undefined,nome,tel:val("cTel"),compleanno:val("cComp")?val("cComp").slice(5):"",email:val("cEmail"),note:val("cNote"),consenso:true,tid:d.sutav?UI.selT:undefined});
-    if(j){toast("Cliente salvato");pulisci("cNome","cTel","cComp","cEmail","cNote","cCons");closeModal()}},
+    const j=await api("cli.salva",{id:d.id||undefined,nome,tel:val("cTel"),compleanno:val("cComp")?val("cComp").slice(5):"",email:val("cEmail"),note:val("cNote"),consenso:true,consensoMsg:!!($("cMkt")&&$("cMkt").checked),consensoSalute:!!($("cSal")&&$("cSal").checked),tid:d.sutav?UI.selT:undefined});
+    if(j){toast("Cliente salvato");pulisci("cNome","cTel","cComp","cEmail","cNote","cCons","cMkt","cSal");closeModal()}},
   cliEliminaChiedi(){UI.modal.conferma=true;renderModal()},
   cliEliminaNo(){UI.modal.conferma=false;renderModal()},
   async cliElimina(d){if(await api("cli.elimina",{id:d.id})){toast("Cliente cancellato con tutti i suoi dati");closeModal()}},
@@ -2185,7 +2277,7 @@ avvio();
   document.getElementById("tdSi").addEventListener("click",function(){TavoloDemo.ricomincia()});
   var visto=false;try{visto=localStorage.getItem("tavolo-demo-visto")}catch(e){}
   // appena si entra nel programma il pannello si chiude, così non copre le schermate
-  var dentro=false;new MutationObserver(function(){var t=!!document.getElementById("tabs");if(t&&!dentro&&!p.hidden)apri(false);dentro=t}).observe(document.body,{childList:true,subtree:true});
+  var dentro=false;new MutationObserver(function(){var tp=document.getElementById("top"),t=!!(tp&&!tp.hidden);if(t&&!dentro&&!p.hidden)apri(false);dentro=t}).observe(document.body,{childList:true,subtree:true});
   if(!visto){apri(true);try{localStorage.setItem("tavolo-demo-visto","1")}catch(e){}}
 })();
 </script>
